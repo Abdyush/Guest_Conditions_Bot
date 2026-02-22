@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
@@ -14,33 +14,16 @@ class OfferError(ValueError):
 
 @dataclass(frozen=True, slots=True)
 class Offer:
-    """
-    Offer = условия применимости + скидка.
-
-    Применимость зависит от:
-    - окна проживания (stay) — конкретный подпериод внутри большой доступности
-    - сегодняшней даты бронирования (booking_date) — чтобы не показывать то, что нельзя забронировать сейчас
-    - категории/тарифа (если оффер ограничен ими)
-    """
     id: str
     title: str
     description: str
     discount: Discount
-
-    # Проживание должно целиком входить хотя бы в один из этих периодов
     stay_periods: Sequence[DateRange]
-
-    # Если задан — booking_date должен попадать внутрь
     booking_period: Optional[DateRange] = None
-
-    # Минимальное число ночей (если задано)
     min_nights: Optional[int] = None
-
-    # Ограничения по категории/тарифу (если заданы)
-    categories: Optional[set[str]] = None
+    allowed_groups: Optional[set[str]] = None
+    allowed_categories: Optional[set[str]] = None
     tariffs: Optional[set[str]] = None
-
-    # Можно ли суммировать с лояльностью
     loyalty_compatible: bool = True
 
     def __post_init__(self) -> None:
@@ -55,72 +38,71 @@ class Offer:
 
         if not self.stay_periods:
             raise OfferError("stay_periods must not be empty")
-        for p in self.stay_periods:
-            if not isinstance(p, DateRange):
+        for period in self.stay_periods:
+            if not isinstance(period, DateRange):
                 raise OfferError("stay_periods must contain DateRange")
 
         if self.booking_period is not None and not isinstance(self.booking_period, DateRange):
             raise OfferError("booking_period must be DateRange or None")
 
-        if self.min_nights is not None:
-            if not isinstance(self.min_nights, int) or self.min_nights <= 0:
-                raise OfferError("min_nights must be int > 0 if provided")
+        if self.min_nights is not None and (not isinstance(self.min_nights, int) or self.min_nights <= 0):
+            raise OfferError("min_nights must be int > 0 if provided")
 
-        if self.categories is not None:
-            if not isinstance(self.categories, set) or any((not isinstance(x, str) or not x.strip()) for x in self.categories):
-                raise OfferError("categories must be set[str] with non-empty strings")
+        if self.allowed_groups is not None:
+            invalid = any((not isinstance(x, str) or not x.strip()) for x in self.allowed_groups)
+            if not isinstance(self.allowed_groups, set) or invalid:
+                raise OfferError("allowed_groups must be set[str] with non-empty strings")
+
+        if self.allowed_categories is not None:
+            invalid = any((not isinstance(x, str) or not x.strip()) for x in self.allowed_categories)
+            if not isinstance(self.allowed_categories, set) or invalid:
+                raise OfferError("allowed_categories must be set[str] with non-empty strings")
 
         if self.tariffs is not None:
-            if not isinstance(self.tariffs, set) or any((not isinstance(x, str) or not x.strip()) for x in self.tariffs):
+            invalid = any((not isinstance(x, str) or not x.strip()) for x in self.tariffs)
+            if not isinstance(self.tariffs, set) or invalid:
                 raise OfferError("tariffs must be set[str] with non-empty strings")
 
         if not isinstance(self.loyalty_compatible, bool):
             raise OfferError("loyalty_compatible must be bool")
 
     def is_bookable(self, booking_date: date) -> bool:
-        """
-        Можно ли использовать оффер сегодня (или в указанную дату бронирования).
-        Если booking_period не задан — считаем, что бронировать можно всегда.
-        """
         if self.booking_period is None:
             return True
         return self.booking_period.contains(booking_date)
 
+    def is_eligible_by_period_length(self, nights: int) -> bool:
+        if self.min_nights is None:
+            return True
+        return nights >= self.min_nights
+
     def is_applicable(
         self,
-        stay: DateRange,
+        stay_range: DateRange,
         *,
         booking_date: date,
         category_id: str,
+        group_id: str,
         tariff_code: str,
     ) -> bool:
-        """
-        Проверяет применимость оффера к конкретному окну проживания stay.
+        has_limits = (self.allowed_groups is not None) or (self.allowed_categories is not None)
+        if has_limits:
+            ok = False
+            if self.allowed_groups is not None and group_id in self.allowed_groups:
+                ok = True
+            if self.allowed_categories is not None and category_id in self.allowed_categories:
+                ok = True
+            if not ok:
+                return False
 
-        Важно:
-        - booking_date обязателен: если сегодня не в booking_period — оффер не применим
-        - category_id/tariff_code обязательны: иначе нельзя корректно проверить ограничения
-        """
-
-        # 0) можно ли бронировать в booking_date
         if not self.is_bookable(booking_date):
             return False
 
-        # 1) минимальные ночи
-        if self.min_nights is not None and stay.nights < self.min_nights:
-            return False
-
-        # 2) категория
-        if self.categories is not None and category_id not in self.categories:
-            return False
-
-        # 3) тариф
         if self.tariffs is not None and tariff_code not in self.tariffs:
             return False
 
-        # 4) stay целиком должен попасть хотя бы в один разрешённый stay_period
-        for p in self.stay_periods:
-            if p.start <= stay.start and stay.end <= p.end:
+        for period in self.stay_periods:
+            if period.start <= stay_range.start and stay_range.end <= period.end:
                 return True
 
         return False

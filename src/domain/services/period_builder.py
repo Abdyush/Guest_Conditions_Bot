@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import timedelta
@@ -14,11 +14,6 @@ class PeriodBuilderError(ValueError):
 
 @dataclass(frozen=True, slots=True)
 class BuiltPeriod:
-    """
-    Период проживания + связанные с ним дневные цены.
-    DateRange: [start, end)
-    rates: список DailyRate в порядке дат, длина == nights
-    """
     date_range: DateRange
     rates: list[DailyRate]
 
@@ -26,33 +21,47 @@ class BuiltPeriod:
     def nights(self) -> int:
         return self.date_range.nights
 
+    @property
+    def category_id(self) -> str:
+        return self.rates[0].category_id
+
+    @property
+    def group_id(self) -> str:
+        return self.rates[0].group_id
+
+    @property
+    def tariff_code(self) -> str:
+        return self.rates[0].tariff_code
+
+    @property
+    def adults_count(self) -> int:
+        return self.rates[0].adults_count
+
 
 class PeriodBuilder:
-    """
-    Строит подряд идущие периоды из DailyRate.
-
-    ВАЖНО:
-    - вход должен быть для одной пары (category_id, tariff_code)
-      (это упрощает и исключает смешивание тарифов)
-    - если попадутся чужие category/tariff — кидаем ошибку
-    """
-
     @staticmethod
     def build(rates: Iterable[DailyRate]) -> list[BuiltPeriod]:
         rates_list = list(rates)
         if not rates_list:
             return []
 
-        # проверяем единый ключ (category_id, tariff_code)
-        key = (rates_list[0].category_id, rates_list[0].tariff_code)
+        groups: dict[tuple[str, str, int], list[DailyRate]] = {}
         for r in rates_list:
-            if (r.category_id, r.tariff_code) != key:
-                raise PeriodBuilderError(
-                    "All DailyRate items must have the same (category_id, tariff_code)"
-                )
+            groups.setdefault((r.category_id, r.tariff_code, r.adults_count), []).append(r)
 
-        # сортируем по дате (на вход можно подавать как угодно)
-        rates_list.sort(key=lambda x: x.date)
+        periods: list[BuiltPeriod] = []
+        for group_rates in groups.values():
+            periods.extend(PeriodBuilder._build_one_key(group_rates))
+
+        periods.sort(key=lambda p: (p.category_id, p.tariff_code, p.adults_count, p.date_range.start))
+        return periods
+
+    @staticmethod
+    def _build_one_key(rates: list[DailyRate]) -> list[BuiltPeriod]:
+        if not rates:
+            return []
+
+        rates.sort(key=lambda x: x.date)
 
         periods: list[BuiltPeriod] = []
         cur_rates: list[DailyRate] = []
@@ -62,13 +71,12 @@ class PeriodBuilder:
             if not cur_rates:
                 return
             start = cur_rates[0].date
-            # end = last_date + 1 день
             end = cur_rates[-1].date + timedelta(days=1)
             periods.append(BuiltPeriod(DateRange(start, end), cur_rates))
             cur_rates = []
 
         prev_date = None
-        for r in rates_list:
+        for r in rates:
             if not r.is_available:
                 flush()
                 prev_date = None

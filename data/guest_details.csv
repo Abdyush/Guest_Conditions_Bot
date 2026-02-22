@@ -1,0 +1,4 @@
+guest_id;name;desired_price_minor;currency;allowed_groups;adults;teens_4_13;infants_0_3;loyalty_status;bank_status
+G1;Ivan Petrov;82900000;RUB;DELUXE;2;1;0;BRONZE;
+G2;Maria Sidorova;49000000;RUB;ROYAL_SUITE,VILLA;2;0;1;SILVER;SBER_PREMIER
+G3;Alex Kim;6500000;RUB;;1;0;0;GOLD;

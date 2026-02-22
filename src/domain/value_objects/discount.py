@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal
 from enum import Enum
+from typing import Optional
 
 from src.domain.value_objects.money import Money
 
@@ -40,6 +41,9 @@ class Discount:
     def apply(self, nightly_prices: list[Money]) -> DiscountResult:
         raise NotImplementedError
 
+    def per_night_multiplier(self) -> Optional[Decimal]:
+        return None
+
 
 @dataclass(frozen=True, slots=True)
 class PercentOff(Discount):
@@ -65,6 +69,9 @@ class PercentOff(Discount):
             total_after=total_after,
             label=f"{pct}% off",
         )
+
+    def per_night_multiplier(self) -> Optional[Decimal]:
+        return Decimal("1") - self.percent
 
 
 @dataclass(frozen=True, slots=True)
@@ -147,3 +154,6 @@ class PayXGetY(Discount):
             total_after=total_after,
             label=f"Pay {self.pay_nights} get {self.get_nights}",
         )
+
+    def per_night_multiplier(self) -> Optional[Decimal]:
+        return Decimal(self.pay_nights) / Decimal(self.get_nights)

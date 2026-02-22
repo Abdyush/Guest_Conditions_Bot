@@ -133,3 +133,11 @@ def test_invalid_amount_nan_raises():
 def test_invalid_amount_infinite_raises():
     with pytest.raises(MoneyError):
         Money(Decimal("Infinity"), "RUB")
+
+
+def test_round_rubles_half_up_down():
+    assert Money.rub("26000.40").round_rubles() == 26000
+
+
+def test_round_rubles_half_up_up():
+    assert Money.rub("25999.60").round_rubles() == 26000

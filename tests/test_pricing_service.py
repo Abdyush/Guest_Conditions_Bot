@@ -8,8 +8,10 @@ from src.domain.value_objects.date_range import DateRange
 from src.domain.value_objects.money import Money
 from src.domain.value_objects.discount import PercentOff, PayXGetY
 from src.domain.entities.offer import Offer
+from src.domain.services.child_supplement_policy import ChildSupplementPolicy, PeriodSupplement
 from src.domain.value_objects.loyalty import LoyaltyPolicy, LoyaltyStatus
 from src.domain.services.pricing_service import PricingService, PricingContext
+from src.domain.value_objects.category_rule import CategoryRule, PricingMode
 
 
 def d(y, m, day):
@@ -89,3 +91,60 @@ def test_loyalty_not_applied_when_offer_not_compatible():
     q = service.price_period(period, offer=offer, ctx=PricingContext(booking_date=d(2026, 2, 5), loyalty_status=LoyaltyStatus.GOLD))
     assert q.total_after.amount == Decimal("140.00")
     assert q.loyalty_discount.amount == Decimal("0.00")
+
+
+def test_offer_not_applied_when_category_not_allowed():
+    service = PricingService(policy())
+    period = make_period(["100", "100"], cat="deluxe")
+
+    offer = Offer(
+        id="o4",
+        title="category restricted",
+        description="",
+        discount=PercentOff(Decimal("0.30")),
+        stay_periods=[DateRange(d(2026, 2, 1), d(2026, 3, 1))],
+        min_nights=1,
+        allowed_groups={"suite"},
+        loyalty_compatible=True,
+    )
+
+    q = service.price_period(period, offer=offer, ctx=PricingContext(booking_date=d(2026, 2, 5), loyalty_status=LoyaltyStatus.GOLD))
+    assert q.offer_discount.amount == Decimal("0.00")
+    assert q.total_after.amount == Decimal("180.00")
+
+
+def test_child_supplement_is_added_for_per_adult_mode():
+    rules = {
+        "deluxe": CategoryRule(
+            group_id="deluxe",
+            capacity_adults=3,
+            free_infants=1,
+            pricing_mode=PricingMode.PER_ADULT,
+        )
+    }
+    policies = {
+        "deluxe": ChildSupplementPolicy(
+            period_rules=[
+                PeriodSupplement(
+                    start=d(2026, 2, 1),
+                    end=d(2026, 2, 28),
+                    amount=Money.rub("10"),
+                )
+            ],
+            default_amount=Money.rub("5"),
+        )
+    }
+    service = PricingService(policy(), category_rules=rules, child_policies=policies)
+    period = make_period(["100", "100"], cat="deluxe")
+
+    q = service.price_period(
+        period,
+        offer=None,
+        ctx=PricingContext(
+            booking_date=d(2026, 2, 5),
+            loyalty_status=LoyaltyStatus.GOLD,
+            children_4_13=2,
+        ),
+    )
+    assert q.total_before.amount == Decimal("240.00")
+    assert q.total_after.amount == Decimal("216.00")

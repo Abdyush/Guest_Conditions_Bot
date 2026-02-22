@@ -1,0 +1,2 @@
+id;title;description;discount_type;discount_value;min_nights;stay_periods;booking_period;allowed_groups;allowed_categories;loyalty_compatible
+O1;Test Offer;desc;PERCENT;0.10;2;2026-02-01..2026-02-10|2026-03-01..2026-03-05;2026-01-20..2026-03-15;DELUXE,ROYAL_SUITE;;true
