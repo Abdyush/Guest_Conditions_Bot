@@ -6,6 +6,8 @@ from src.domain.entities.rate import DailyRate
 from src.domain.services.date_price_selector import DatePriceSelector
 from src.domain.services.period_builder import PeriodBuilder
 from src.domain.services.pricing_service import PricingContext, PricingService
+from src.domain.services.child_supplement_policy import ChildSupplementPolicy, PeriodSupplement
+from src.domain.value_objects.category_rule import CategoryRule, PricingMode
 from src.domain.value_objects.bank import BankStatus
 from src.domain.value_objects.date_range import DateRange
 from src.domain.value_objects.discount import PayXGetY, PercentOff
@@ -277,4 +279,71 @@ def test_best_offer_selection_considers_bank_final_price():
 
     assert cand.offer_id == "o8"
     assert cand.new_price.amount == Decimal("72.25")
+
+
+def test_offer_applies_for_nights_inside_stay_period_even_if_availability_range_is_longer():
+    service = PricingService(loyalty_policy())
+    selector = DatePriceSelector(service)
+    rates = make_rates(d(2026, 2, 24), ["100", "100", "100", "100", "100", "100"])
+    periods = PeriodBuilder.build(rates)
+    offer = Offer(
+        id="o9",
+        title="15%",
+        description="",
+        discount=PercentOff(Decimal("0.15")),
+        stay_periods=[DateRange(d(2026, 2, 1), d(2026, 2, 28))],
+        booking_period=DateRange(d(2026, 2, 1), d(2026, 2, 28)),
+        min_nights=2,
+        loyalty_compatible=True,
+    )
+
+    ctx = PricingContext(booking_date=d(2026, 2, 24))
+    best = selector.best_prices_by_date(daily_rates=rates, periods=periods, offers=[offer], ctx=ctx)
+
+    assert best[k(d(2026, 2, 24))].new_price.amount == Decimal("85.00")
+    assert best[k(d(2026, 2, 25))].new_price.amount == Decimal("85.00")
+    assert best[k(d(2026, 2, 26))].new_price.amount == Decimal("85.00")
+    assert best[k(d(2026, 2, 27))].new_price.amount == Decimal("85.00")
+    assert best[k(d(2026, 2, 28))].new_price.amount == Decimal("100.00")
+    assert best[k(d(2026, 3, 1))].new_price.amount == Decimal("100.00")
+
+
+def test_child_supplement_is_added_before_offer_and_loyalty():
+    rules = {
+        "DELUXE": CategoryRule(
+            group_id="DELUXE",
+            capacity_adults=3,
+            free_infants=1,
+            pricing_mode=PricingMode.PER_ADULT,
+        )
+    }
+    child_policies = {
+        "DELUXE": ChildSupplementPolicy(
+            period_rules=[PeriodSupplement(start=d(2026, 2, 1), end=d(2026, 2, 28), amount=Money.rub("10"))],
+            default_amount=Money.rub("5"),
+        )
+    }
+    service = PricingService(loyalty_policy(), group_rules=rules, child_policy_by_group=child_policies)
+    selector = DatePriceSelector(service)
+
+    rates = make_rates(d(2026, 2, 10), ["100"], adults=2)
+    periods = PeriodBuilder.build(rates)
+
+    offer = Offer(
+        id="o10",
+        title="10%",
+        description="",
+        discount=PercentOff(Decimal("0.10")),
+        stay_periods=[DateRange(d(2026, 2, 1), d(2026, 3, 1))],
+        booking_period=DateRange(d(2026, 2, 1), d(2026, 2, 28)),
+        min_nights=1,
+        loyalty_compatible=True,
+    )
+
+    ctx = PricingContext(booking_date=d(2026, 2, 10), loyalty_status=LoyaltyStatus.GOLD, children_4_13=1)
+    best = selector.best_prices_by_date(daily_rates=rates, periods=periods, offers=[offer], ctx=ctx)
+    cand = best[k(d(2026, 2, 10), adults=2)]
+
+    assert cand.old_price.amount == Decimal("110.00")
+    assert cand.new_price.amount == Decimal("89.10")
 

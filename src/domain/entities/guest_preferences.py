@@ -20,6 +20,7 @@ class GuestPreferences:
     occupancy: Occupancy = Occupancy(adults=1, children_4_13=0, infants=0)
     guest_id: Optional[str] = None
     guest_name: Optional[str] = None
+    guest_phone: Optional[str] = None
 
     @property
     def effective_allowed_groups(self) -> Optional[Set[str]]:

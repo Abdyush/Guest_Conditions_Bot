@@ -1,4 +1,2 @@
 id;title;description;discount_type;discount_value;min_nights;stay_periods;booking_period;allowed_groups;allowed_categories;loyalty_compatible
-WINTER_15;Winter 15%;15 percent off for winter stays;PERCENT;0.15;2;2026-02-01..2026-03-01;2026-02-01..2026-03-15;;;true
-VILLA_30;Villa Season 30%;30 percent off for villas in high season;PERCENT;0.30;3;2026-02-01..2026-04-15;2026-02-01..2026-04-30;VILLA;;true
-PAY4GET3_SUITES;Suites 4=3;Pay 3 nights out of 4 in royal suites;PAY_X_GET_Y;3/4;4;2026-03-01..2026-03-25;2026-02-01..2026-03-31;ROYAL_SUITE;;false
+WINTER_15;Winter 15%;15 percent off for winter stays;PERCENT;0.15;2;2026-02-01..2026-02-28;2026-02-01..2026-02-27;;;true

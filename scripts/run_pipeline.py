@@ -4,18 +4,14 @@ import argparse
 from collections import defaultdict
 from datetime import date, datetime, timedelta
 from decimal import Decimal
-from pathlib import Path
-import sys
 from uuid import uuid4
 
 try:
-    from dotenv import load_dotenv
+    from _runtime import ensure_project_on_sys_path, load_env_if_available
 except ImportError:  # pragma: no cover
-    load_dotenv = None
+    from scripts._runtime import ensure_project_on_sys_path, load_env_if_available
 
-ROOT = Path(__file__).resolve().parents[1]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+ROOT = ensure_project_on_sys_path()
 
 from src.application.dto.best_date import BestDate
 from src.application.dto.date_line import DateLineDTO
@@ -58,6 +54,24 @@ def _record_key(record: MatchedDateRecord) -> tuple[str, date, str, str, int, st
     )
 
 
+def _line_belongs_to_period_record(guest_id: str, line: DateLineDTO, rec: MatchedDateRecord) -> bool:
+    period_end = rec.period_end or rec.date
+    same_identity = (
+        guest_id == rec.guest_id
+        and line.category_name == rec.category_name
+        and line.tariff_code == rec.tariff
+        and line.new_price.amount_minor == rec.new_price_minor
+        and (line.offer_id or "") == (rec.offer_id or "")
+        and ((line.applied_bank_status.value if line.applied_bank_status else "") == (rec.bank_status or ""))
+        and ((line.applied_loyalty_status or "") == (rec.loyalty_status or ""))
+    )
+    if not same_identity:
+        return False
+    if not (rec.date <= line.date <= period_end):
+        return False
+    return line.availability_period.start == rec.availability_start and line.availability_period.end == rec.availability_end
+
+
 def _line_to_record(guest_id: str, line: DateLineDTO, *, computed_at: datetime) -> MatchedDateRecord:
     return MatchedDateRecord(
         guest_id=guest_id,
@@ -78,6 +92,7 @@ def _line_to_record(guest_id: str, line: DateLineDTO, *, computed_at: datetime) 
         availability_start=line.availability_period.start,
         availability_end=line.availability_period.end,
         computed_at=computed_at,
+        period_end=line.date,
     )
 
 
@@ -120,8 +135,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
-    if load_dotenv is not None:
-        load_dotenv()
+    load_env_if_available()
 
     args = build_parser().parse_args()
     date_from = _parse_date(args.date_from)
@@ -134,11 +148,13 @@ def main() -> None:
 
     try:
         from src.infrastructure.repositories.postgres_daily_rates_repository import PostgresDailyRatesRepository
+        from src.infrastructure.repositories.postgres_desired_matches_run_repository import PostgresDesiredMatchesRunRepository
         from src.infrastructure.repositories.postgres_guests_repository import PostgresGuestsRepository
         from src.infrastructure.repositories.postgres_matches_run_repository import PostgresMatchesRunRepository
         from src.infrastructure.repositories.postgres_notifications_repository import PostgresNotificationsRepository
         from src.infrastructure.repositories.postgres_offers_repository import PostgresOffersRepository
         from src.infrastructure.repositories.postgres_rules_repository import PostgresRulesRepository
+        from src.infrastructure.repositories.postgres_user_identities_repository import PostgresUserIdentitiesRepository
     except ModuleNotFoundError as exc:  # pragma: no cover
         raise RuntimeError(
             "SQLAlchemy and psycopg2 are required for persistence. Install dependencies and set DATABASE_URL in .env."
@@ -147,8 +163,10 @@ def main() -> None:
     rates_repo = PostgresDailyRatesRepository()
     offers_repo = PostgresOffersRepository()
     guests_repo = PostgresGuestsRepository()
+    user_identities_repo = PostgresUserIdentitiesRepository()
     rules_repo = PostgresRulesRepository()
     matches_run_repo = PostgresMatchesRunRepository()
+    desired_matches_run_repo = PostgresDesiredMatchesRunRepository()
     notifications_repo = PostgresNotificationsRepository()
 
     notifier = ConsoleNotifier()
@@ -168,7 +186,15 @@ def main() -> None:
     rules_repo.replace_from_csv(args.rules_csv)
     rates_repo.replace_all(csv_rates_repo.get_daily_rates(date.min, date.max))
     offers_repo.replace_all(csv_offers_repo.get_offers(booking_date))
-    guests_repo.replace_all(csv_guests_repo.get_active_guests())
+    csv_guests = csv_guests_repo.get_active_guests()
+    guests_repo.replace_all(csv_guests)
+    for guest in csv_guests:
+        if guest.guest_id and guest.guest_phone:
+            user_identities_repo.upsert_identity(
+                provider="phone",
+                external_user_id=guest.guest_phone,
+                guest_id=guest.guest_id,
+            )
 
     pricing_service = PricingService(loyalty_policy=loyalty_policy, group_rules=rules_repo.get_group_rules(), child_policy_by_group=rules_repo.get_child_policies())
     selector = DatePriceSelector(pricing_service)
@@ -189,21 +215,27 @@ def main() -> None:
     results = use_case.execute(date_from=date_from, date_to=date_to, booking_date=booking_date)
 
     all_records: list[MatchedDateRecord] = []
+    desired_records: list[MatchedDateRecord] = []
     for result in results:
         guest_id = result.guest_id
         for line in result.matched_lines:
-            all_records.append(_line_to_record(guest_id, line, computed_at=computed_at))
+            rec = _line_to_record(guest_id, line, computed_at=computed_at)
+            all_records.append(rec)
+            if line.new_price <= result.desired_price_per_night:
+                desired_records.append(rec)
 
     matches_run_repo.replace_run(run_id, all_records)
+    desired_matches_run_repo.replace_run(run_id, desired_records)
 
-    new_records = notifications_repo.filter_new(all_records)
-    new_keys = {_record_key(r) for r in new_records}
+    new_records = notifications_repo.filter_new(desired_records, as_of_date=booking_date)
+    notified_guests = 0
 
     new_lines_by_guest: dict[str, list[DateLineDTO]] = defaultdict(list)
     for result in results:
         for line in result.matched_lines:
-            key = _record_key(_line_to_record(result.guest_id, line, computed_at=computed_at))
-            if key in new_keys:
+            if line.new_price > result.desired_price_per_night:
+                continue
+            if any(_line_belongs_to_period_record(result.guest_id, line, rec) for rec in new_records):
                 new_lines_by_guest[result.guest_id].append(line)
 
     for result in results:
@@ -214,6 +246,7 @@ def main() -> None:
         if not guest_lines:
             continue
 
+        notified_guests += 1
         guest_title = result.guest_name or result.guest_id
         best_dates = [_to_best_date(x) for x in guest_lines]
         message = presenter.render_batch(best_dates, title=f"{guest_title}: suitable dates", limit=50)
@@ -244,7 +277,13 @@ def main() -> None:
 
         notifier.send(result.guest_id, message)
 
-    notifications_repo.mark_sent(new_records, sent_at=datetime.now())
+    notifications_repo.mark_sent(new_records, run_id=run_id)
+    print(
+        "Run summary: "
+        f"run_id={run_id}, guests_total={len(results)}, "
+        f"matches_total={len(all_records)}, desired_matches_total={len(desired_records)}, new_matches={len(new_records)}, "
+        f"guests_notified={notified_guests}"
+    )
 
 
 if __name__ == "__main__":

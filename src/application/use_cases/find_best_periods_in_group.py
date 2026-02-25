@@ -52,6 +52,8 @@ def find_best_periods_in_group(
     for rate in daily_rates:
         if allowed_groups is not None and rate.group_id not in allowed_groups:
             continue
+        if rate.adults_count != guest.occupancy.adults:
+            continue
         rule = group_rules.get(rate.group_id)
         if rule is not None and not can_fit(rule, guest.occupancy):
             continue

@@ -74,6 +74,19 @@ def _rate(day: date, price: str) -> DailyRate:
     )
 
 
+def _rate_with_adults(day: date, price: str, adults: int) -> DailyRate:
+    return DailyRate(
+        date=day,
+        category_id="Deluxe",
+        group_id="DELUXE",
+        tariff_code="breakfast",
+        adults_count=adults,
+        price=Money.rub(price),
+        is_available=True,
+        is_last_room=False,
+    )
+
+
 def _build_use_case(*, rates, offers, guests):
     group_rules = {
         "DELUXE": CategoryRule(
@@ -146,7 +159,7 @@ def test_execute_returns_result_for_each_guest():
     assert results[0].guest_id == "g1"
     assert len(results[0].matched_lines) == 2
     assert results[1].guest_id == "g2"
-    assert results[1].matched_lines == []
+    assert len(results[1].matched_lines) == 2
 
 
 def test_bank_status_overrides_loyalty_in_use_case():
@@ -202,3 +215,26 @@ def test_offer_applies_then_bank_after_offer_percent():
     line = results[0].matched_lines[0]
     assert line.new_price.amount == Decimal("72.25")
     assert line.applied_bank_percent == Decimal("0.15")
+
+
+def test_use_case_uses_only_rates_with_guest_adults_count():
+    rates = [
+        _rate_with_adults(d(2026, 2, 10), "100", adults=1),
+        _rate_with_adults(d(2026, 2, 10), "120", adults=2),
+        _rate_with_adults(d(2026, 2, 10), "140", adults=3),
+    ]
+    guests = [
+        GuestPreferences(
+            desired_price_per_night=Money.rub("200"),
+            allowed_groups={"DELUXE"},
+            occupancy=Occupancy(adults=2, children_4_13=0, infants=0),
+            guest_id="g_adults_2",
+        )
+    ]
+
+    use_case = _build_use_case(rates=rates, offers=[], guests=guests)
+    results = use_case.execute(date_from=d(2026, 2, 10), date_to=d(2026, 2, 10), booking_date=d(2026, 2, 5))
+
+    assert len(results) == 1
+    assert len(results[0].matched_lines) == 1
+    assert results[0].matched_lines[0].old_price.amount == Decimal("120.00")

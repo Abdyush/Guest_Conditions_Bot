@@ -66,8 +66,6 @@ class CalculateMatchesForAllGuests:
             for cand in lines_map.values():
                 if not (date_from <= cand.day <= date_to):
                     continue
-                if cand.new_price > guest.desired_price_per_night:
-                    continue
                 matched_lines.append(
                     DateLineDTO(
                         date=cand.day,
@@ -117,6 +115,7 @@ class CalculateMatchesForAllGuests:
                     guest_name=guest.guest_name,
                     matched_lines=matched_lines,
                     best_periods=best_periods,
+                    desired_price_per_night=guest.desired_price_per_night,
                 )
             )
 
@@ -128,6 +127,8 @@ class CalculateMatchesForAllGuests:
         out = []
         for rate in rates:
             if allowed_groups is not None and rate.group_id not in allowed_groups:
+                continue
+            if rate.adults_count != guest.occupancy.adults:
                 continue
             rule = group_rules.get(rate.group_id)
             if rule is not None and not can_fit(rule, guest.occupancy):

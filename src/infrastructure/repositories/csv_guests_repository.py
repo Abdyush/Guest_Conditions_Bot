@@ -78,6 +78,7 @@ class CsvGuestsRepository(GuestsRepository):
                     ),
                     guest_id=(row.get("guest_id") or "").strip() or None,
                     guest_name=(row.get("name") or "").strip() or None,
+                    guest_phone=(row.get("phone") or "").strip() or None,
                 )
             )
         return guests

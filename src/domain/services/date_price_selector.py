@@ -1,7 +1,7 @@
 ﻿from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from typing import Iterable, Optional
 
@@ -64,7 +64,13 @@ class DatePriceSelector:
                 if not rate.is_available:
                     continue
 
-                old = rate.price
+                old = self._pricing.price_night_base(
+                    rate.price,
+                    ctx=ctx,
+                    group_id=rate.group_id,
+                    category_id=rate.category_id,
+                    stay_date=rate.date,
+                )
                 if bank_discount is not None and ctx.bank_status is not None:
                     base_price = old.percent_off(bank_discount.open_percent)
                     base_loyalty_status = None
@@ -105,8 +111,11 @@ class DatePriceSelector:
                     if not offer.is_eligible_by_period_length(nights):
                         continue
 
+                    # Offer applicability should be checked for the candidate night,
+                    # not for the whole contiguous availability period.
+                    stay_night = DateRange(rate.date, rate.date + timedelta(days=1))
                     if not offer.is_applicable(
-                        stay_range=period.date_range,
+                        stay_range=stay_night,
                         booking_date=ctx.booking_date,
                         category_id=rate.category_id,
                         group_id=rate.group_id,

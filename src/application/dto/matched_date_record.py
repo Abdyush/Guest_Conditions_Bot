@@ -25,3 +25,4 @@ class MatchedDateRecord:
     availability_start: date
     availability_end: date
     computed_at: datetime
+    period_end: date | None = None

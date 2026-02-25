@@ -48,6 +48,22 @@ class PricingService:
             return None
         return self._bank_policy.discount_for(bank_status)
 
+    def price_night_base(
+        self,
+        price: Money,
+        *,
+        ctx: PricingContext,
+        group_id: Optional[str] = None,
+        category_id: Optional[str] = None,
+        stay_date: Optional[date] = None,
+    ) -> Money:
+        return self._nightly_total(
+            base_price=price,
+            group_id=group_id or category_id,
+            stay_date=stay_date,
+            children_4_13=ctx.children_4_13,
+        )
+
     def price_night_loyalty_only(
         self,
         price: Money,

@@ -39,6 +39,8 @@ class FindBestDatesForGuest:
 
         filtered_rates: list[DailyRate] = []
         for rate in rates:
+            if rate.adults_count != preferences.occupancy.adults:
+                continue
             rule = self._group_rules.get(rate.group_id)
             if rule is not None and not can_fit(rule, preferences.occupancy):
                 continue

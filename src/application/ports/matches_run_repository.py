@@ -11,3 +11,6 @@ class MatchesRunRepository(Protocol):
 
     def get_run_rows(self, run_id: str) -> list[MatchedDateRecord]:
         ...
+
+    def get_latest_run_id(self) -> str | None:
+        ...

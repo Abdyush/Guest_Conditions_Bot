@@ -1,5 +1,5 @@
 import os
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -37,8 +37,9 @@ def _record(*, guest_id: str, day: date, new_price_minor: int = 9000, offer_id: 
         bank_status=None,
         bank_percent=None,
         availability_start=day,
-        availability_end=day,
+        availability_end=day + timedelta(days=1),
         computed_at=datetime(2026, 2, 1, 12, 0, 0),
+        period_end=day,
     )
 
 
@@ -54,7 +55,7 @@ def matches_repo() -> PostgresMatchesRunRepository:
 def notifications_repo() -> PostgresNotificationsRepository:
     repo = PostgresNotificationsRepository(PG_TEST_DATABASE_URL)
     with repo._engine.begin() as conn:  # type: ignore[attr-defined]
-        conn.execute(text("TRUNCATE TABLE notifications RESTART IDENTITY"))
+        conn.execute(text("TRUNCATE TABLE notifications"))
     return repo
 
 
@@ -83,8 +84,8 @@ def test_notifications_dedup(notifications_repo: PostgresNotificationsRepository
     candidate_same = _record(guest_id="g1", day=date(2026, 2, 10), new_price_minor=9000, offer_id="o1")
     candidate_changed_price = _record(guest_id="g1", day=date(2026, 2, 10), new_price_minor=9100, offer_id="o1")
 
-    notifications_repo.mark_sent([sent], sent_at=datetime(2026, 2, 1, 12, 0, 0))
+    notifications_repo.mark_sent([sent], run_id="run_old")
 
-    new_rows = notifications_repo.filter_new([candidate_same, candidate_changed_price])
+    new_rows = notifications_repo.filter_new([candidate_same, candidate_changed_price], as_of_date=date(2026, 2, 10))
 
     assert new_rows == [candidate_changed_price]

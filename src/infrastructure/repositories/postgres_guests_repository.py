@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 
 from sqlalchemy import BIGINT, INTEGER, TEXT, Column, MetaData, Table, create_engine, select, text
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.engine import Engine
 
 from src.application.ports.guests_repository import GuestsRepository
@@ -107,3 +108,51 @@ class PostgresGuestsRepository(GuestsRepository):
                     )
                 )
         return out
+
+    def create_guest(self, guest: GuestPreferences) -> str:
+        guest_id = (guest.guest_id or "").strip() or self._next_guest_id()
+        values = {
+            "guest_id": guest_id,
+            "name": guest.guest_name,
+            "desired_price_minor": guest.desired_price_per_night.amount_minor,
+            "currency": guest.desired_price_per_night.currency,
+            "allowed_groups": _serialize_groups(guest.effective_allowed_groups),
+            "adults": guest.occupancy.adults,
+            "teens_4_13": guest.occupancy.children_4_13,
+            "infants_0_3": guest.occupancy.infants,
+            "loyalty_status": guest.loyalty_status.value.upper() if guest.loyalty_status else None,
+            "bank_status": guest.bank_status.value if guest.bank_status else None,
+        }
+        stmt = insert(guests_table).values(values)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["guest_id"],
+            set_={
+                "name": values["name"],
+                "desired_price_minor": values["desired_price_minor"],
+                "currency": values["currency"],
+                "allowed_groups": values["allowed_groups"],
+                "adults": values["adults"],
+                "teens_4_13": values["teens_4_13"],
+                "infants_0_3": values["infants_0_3"],
+                "loyalty_status": values["loyalty_status"],
+                "bank_status": values["bank_status"],
+            },
+        )
+        with self._engine.begin() as conn:
+            conn.execute(stmt)
+        return guest_id
+
+    def _next_guest_id(self) -> str:
+        with self._engine.connect() as conn:
+            rows = conn.execute(select(guests_table.c.guest_id)).scalars().all()
+        max_num = 0
+        for guest_id in rows:
+            if not guest_id:
+                continue
+            value = str(guest_id).strip().upper()
+            if not value.startswith("G"):
+                continue
+            tail = value[1:]
+            if tail.isdigit():
+                max_num = max(max_num, int(tail))
+        return f"G{max_num + 1}"
