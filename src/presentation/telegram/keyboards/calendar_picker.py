@@ -73,7 +73,6 @@ def build_period_calendar_keyboard(
     rows.append(
         [
             InlineKeyboardButton(text="Назад", callback_data="nav:back_quotes_group"),
-            InlineKeyboardButton(text="Главное меню", callback_data="nav:main"),
         ]
     )
     return InlineKeyboardMarkup(rows)

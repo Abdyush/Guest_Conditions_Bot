@@ -26,3 +26,4 @@ class ConversationState(str, Enum):
     AWAIT_BEST_GROUP_ID = "await_best_group_id"
     AWAIT_QUOTES_GROUP = "await_quotes_group"
     AWAIT_QUOTES_CALENDAR = "await_quotes_calendar"
+    AWAIT_QUOTES_CATEGORY = "await_quotes_category"

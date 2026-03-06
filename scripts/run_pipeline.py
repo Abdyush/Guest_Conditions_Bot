@@ -16,6 +16,7 @@ ROOT = ensure_project_on_sys_path()
 from src.application.dto.best_date import BestDate
 from src.application.dto.date_line import DateLineDTO
 from src.application.dto.matched_date_record import MatchedDateRecord
+from src.application.ports.daily_rates_source import DailyRatesSourcePort
 from src.application.presenters.telegram_notification_presenter import TelegramNotificationPresenter
 from src.application.use_cases.calculate_matches_for_all_guests import CalculateMatchesForAllGuests
 from src.domain.services.date_price_selector import DatePriceSelector
@@ -39,6 +40,21 @@ def _parse_percent(value: str | None) -> Decimal | None:
     if not cleaned:
         return None
     return (Decimal(cleaned) / Decimal("100")).quantize(Decimal("0.0001"))
+
+
+def _parse_adults(value: str) -> list[int]:
+    out: list[int] = []
+    for chunk in value.split(","):
+        raw = chunk.strip()
+        if not raw:
+            continue
+        parsed = int(raw)
+        if parsed <= 0:
+            raise ValueError("--selenium-adults must contain only positive integers")
+        out.append(parsed)
+    if not out:
+        raise ValueError("--selenium-adults must contain at least one positive integer")
+    return sorted(set(out))
 
 
 def _record_key(record: MatchedDateRecord) -> tuple[str, date, str, str, int, str, str, str]:
@@ -131,6 +147,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--offers-csv", default=str(ROOT / "data" / "special_offers.csv"))
     parser.add_argument("--guests-csv", default=str(ROOT / "data" / "guest_details.csv"))
     parser.add_argument("--rules-csv", default=str(ROOT / "data" / "category_rules.csv"))
+    parser.add_argument("--rates-source", choices=("csv", "selenium"), default="csv")
+    parser.add_argument(
+        "--selenium-adults",
+        default="1,2,3",
+        help="Comma-separated adults_count values for Selenium rates, e.g. 1,2,3",
+    )
+    parser.add_argument(
+        "--selenium-visible",
+        action="store_true",
+        help="Run Chrome with UI (headless is default).",
+    )
+    parser.add_argument("--selenium-wait-seconds", type=int, default=20)
     return parser
 
 
@@ -142,7 +170,19 @@ def main() -> None:
     date_to = _parse_date(args.date_to)
     booking_date = _parse_date(args.booking_date)
 
-    csv_rates_repo = CsvRatesRepository(rates_csv_path=args.rates_csv)
+    rates_source: DailyRatesSourcePort
+    if args.rates_source == "selenium":
+        from src.infrastructure.sources.selenium_daily_rates_source import SeleniumDailyRatesSource
+
+        rates_source = SeleniumDailyRatesSource(
+            category_rules_csv_path=args.rules_csv,
+            adults_counts=_parse_adults(args.selenium_adults),
+            headless=not args.selenium_visible,
+            wait_seconds=args.selenium_wait_seconds,
+        )
+    else:
+        rates_source = CsvRatesRepository(rates_csv_path=args.rates_csv)
+
     csv_offers_repo = CsvOffersRepository(offers_csv_path=args.offers_csv)
     csv_guests_repo = CsvGuestsRepository(guests_csv_path=args.guests_csv)
 
@@ -184,7 +224,11 @@ def main() -> None:
     )
     # Load all CSV data into Postgres; from this point pipeline reads only from DB repositories.
     rules_repo.replace_from_csv(args.rules_csv)
-    rates_repo.replace_all(csv_rates_repo.get_daily_rates(date.min, date.max))
+    if args.rates_source == "selenium":
+        synced_rates = rates_source.get_daily_rates(date_from, date_to)
+    else:
+        synced_rates = rates_source.get_daily_rates(date.min, date.max)
+    rates_repo.replace_all(synced_rates)
     offers_repo.replace_all(csv_offers_repo.get_offers(booking_date))
     csv_guests = csv_guests_repo.get_active_guests()
     guests_repo.replace_all(csv_guests)

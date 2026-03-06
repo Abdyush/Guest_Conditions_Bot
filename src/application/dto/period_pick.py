@@ -17,6 +17,7 @@ class PeriodPickDTO:
     start_date: date
     end_date_inclusive: date
     nights: int
+    old_price_per_night: Money
     new_price_per_night: Money
     offer_title: Optional[str]
     offer_repr: Optional[str]

@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 
+from src.application.dto.period_quote import PeriodQuote
 from src.presentation.telegram.state.conversation_state import ConversationState
 
 
@@ -26,6 +27,10 @@ class PeriodQuotesDraft:
     month_cursor: date | None = None
     checkin: date | None = None
     checkout: date | None = None
+    run_id: str | None = None
+    quotes: list[PeriodQuote] | None = None
+    category_names: list[str] | None = None
+    last_room_dates_by_category: dict[str, list[date]] | None = None
 
 
 @dataclass(slots=True)
@@ -34,6 +39,7 @@ class UserSession:
     registration: RegistrationDraft | None = None
     period_quotes: PeriodQuotesDraft | None = None
     available_category_names: list[str] | None = None
+    available_category_rows: list | None = None
 
 
 class InMemorySessionStore:
@@ -53,3 +59,4 @@ class InMemorySessionStore:
         session.registration = None
         session.period_quotes = None
         session.available_category_names = None
+        session.available_category_rows = None

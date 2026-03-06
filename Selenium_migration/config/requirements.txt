@@ -1,0 +1,9 @@
+aiogram
+python-dotenv
+sqlalchemy
+asyncpg
+aiosqlite
+asyncio
+psycopg2
+selenium 
+openai

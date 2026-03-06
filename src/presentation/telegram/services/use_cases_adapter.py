@@ -301,6 +301,35 @@ class TelegramUseCasesAdapter:
         out.sort(key=lambda x: (x.date, x.tariff))
         return run_id, out
 
+    def get_last_room_dates(
+        self,
+        *,
+        guest_id: str,
+        category_name: str,
+        period_start: date,
+        period_end: date,
+        tariffs: set[str] | None = None,
+    ) -> list[date]:
+        profile = self.get_guest_profile(guest_id=guest_id)
+        if profile is None:
+            return []
+        adults = profile.occupancy.adults
+        tariffs_norm = {x.strip().lower() for x in tariffs} if tariffs else None
+        rates = self._rates_repo.get_daily_rates(period_start, period_end)
+        out = sorted(
+            {
+                r.date
+                for r in rates
+                if r.category_id == category_name
+                and r.adults_count == adults
+                and r.is_last_room
+                and r.is_available
+                and (tariffs_norm is None or r.tariff_code.strip().lower() in tariffs_norm)
+                and period_start <= r.date <= period_end
+            }
+        )
+        return out
+
 
 def _parse_percent(value: str | None) -> Decimal | None:
     if not value:

@@ -130,6 +130,7 @@ def _to_period_pick(lines: list[DatePriceCandidate], *, group_id: str) -> Period
         start_date=start_date,
         end_date_inclusive=end_date,
         nights=nights,
+        old_price_per_night=selected.old_price,
         new_price_per_night=selected.new_price,
         offer_title=selected.offer_title,
         offer_repr=selected.offer_repr,
