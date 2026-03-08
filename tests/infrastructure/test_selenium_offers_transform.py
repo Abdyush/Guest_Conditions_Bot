@@ -35,3 +35,33 @@ def test_map_legacy_scraped_offers_to_domain() -> None:
     assert offer.loyalty_compatible is True
     assert isinstance(offer.discount, PercentOff)
     assert offer.discount.percent == Decimal("0.2")
+
+
+def test_map_legacy_scraped_offers_to_domain_all_villas_expands_categories() -> None:
+    scraped = [
+        {
+            "title": "Villa Offer",
+            "category": "Все виллы",
+            "stay": [["01.06.2026", "10.06.2026"]],
+            "booking": [["01.05.2026", "31.05.2026"]],
+            "formula": "N = C*0.8",
+            "min": "2",
+            "summ": True,
+            "description": "Скидка 20%",
+        }
+    ]
+
+    offers = map_legacy_scraped_offers_to_domain(
+        scraped,
+        category_to_group={
+            "Вилла Люкс": "VILLA",
+            "Villa Premium": "VILLA",
+            "Делюкс": "DELUXE",
+        },
+        fail_fast=True,
+    )
+
+    assert len(offers) == 1
+    offer = offers[0]
+    assert offer.allowed_categories == {"Вилла Люкс", "Villa Premium"}
+    assert offer.allowed_groups == {"VILLA"}

@@ -104,6 +104,20 @@ def _normalize_categories(raw_categories: Any) -> list[str] | None:
     return None
 
 
+def _is_all_villas(raw_categories: Any) -> bool:
+    return isinstance(raw_categories, str) and "все вилл" in raw_categories.casefold()
+
+
+def _expand_all_villas_categories(category_to_group: dict[str, str]) -> list[str] | None:
+    categories = [
+        category
+        for category in category_to_group.keys()
+        if ("вилл" in _normalize_key(category) or "villa" in _normalize_key(category))
+    ]
+    categories = sorted(set(categories))
+    return categories or None
+
+
 def _offer_id(title: str, raw_text: str) -> str:
     base = (title + "\n" + raw_text).encode("utf-8", errors="ignore")
     return "selenium_offer_" + hashlib.sha1(base).hexdigest()[:16]
@@ -139,7 +153,10 @@ def map_legacy_scraped_offers_to_domain(
         booking_ranges = _parse_ranges(_pick(payload, ("брони", "р±сЂрѕ", "booking")))
         booking_period = booking_ranges[0] if booking_ranges else None
 
-        categories = _normalize_categories(_pick(payload, ("категор", "рєр°с‚егор", "category")))
+        raw_categories = _pick(payload, ("категор", "рєр°с‚егор", "category"))
+        categories = _normalize_categories(raw_categories)
+        if categories is None and _is_all_villas(raw_categories):
+            categories = _expand_all_villas_categories(category_to_group)
         groups: list[str] | None = None
         if categories:
             groups = sorted(

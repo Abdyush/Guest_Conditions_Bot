@@ -17,7 +17,6 @@ from src.application.dto.best_date import BestDate
 from src.application.dto.date_line import DateLineDTO
 from src.application.dto.matched_date_record import MatchedDateRecord
 from src.application.ports.daily_rates_source import DailyRatesSourcePort
-from src.application.ports.offers_source import OffersSourcePort
 from src.application.presenters.telegram_notification_presenter import TelegramNotificationPresenter
 from src.application.use_cases.calculate_matches_for_all_guests import CalculateMatchesForAllGuests
 from src.domain.services.date_price_selector import DatePriceSelector
@@ -26,7 +25,6 @@ from src.domain.services.pricing_service import PricingService
 from src.domain.value_objects.loyalty import LoyaltyPolicy, LoyaltyStatus
 from src.infrastructure.notifiers.console_notifier import ConsoleNotifier
 from src.infrastructure.repositories.csv_guests_repository import CsvGuestsRepository
-from src.infrastructure.repositories.csv_offers_repository import CsvOffersRepository
 from src.infrastructure.repositories.csv_rates_repository import CsvRatesRepository
 
 
@@ -145,11 +143,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--date-to", default=default_to.isoformat(), help="YYYY-MM-DD")
     parser.add_argument("--booking-date", default=date.today().isoformat(), help="YYYY-MM-DD")
     parser.add_argument("--rates-csv", default=str(ROOT / "data" / "daily_rates.csv"))
-    parser.add_argument("--offers-csv", default=str(ROOT / "data" / "special_offers.csv"))
     parser.add_argument("--guests-csv", default=str(ROOT / "data" / "guest_details.csv"))
     parser.add_argument("--rules-csv", default=str(ROOT / "data" / "category_rules.csv"))
     parser.add_argument("--rates-source", choices=("csv", "selenium"), default="csv")
-    parser.add_argument("--offers-source", choices=("csv", "selenium"), default="csv")
     parser.add_argument(
         "--selenium-adults",
         default="1,2,3",
@@ -185,18 +181,14 @@ def main() -> None:
     else:
         rates_source = CsvRatesRepository(rates_csv_path=args.rates_csv)
 
-    offers_source: OffersSourcePort
-    if args.offers_source == "selenium":
-        from src.infrastructure.sources.selenium_offers_source import SeleniumOffersSource
+    from src.infrastructure.sources.selenium_offers_source import SeleniumOffersSource
 
-        offers_source = SeleniumOffersSource(
-            category_rules_csv_path=args.rules_csv,
-            headless=not args.selenium_visible,
-            wait_seconds=args.selenium_wait_seconds,
-            fail_fast=False,
-        )
-    else:
-        offers_source = CsvOffersRepository(offers_csv_path=args.offers_csv)
+    offers_source = SeleniumOffersSource(
+        category_rules_csv_path=args.rules_csv,
+        headless=not args.selenium_visible,
+        wait_seconds=args.selenium_wait_seconds,
+        fail_fast=False,
+    )
 
     csv_guests_repo = CsvGuestsRepository(guests_csv_path=args.guests_csv)
 

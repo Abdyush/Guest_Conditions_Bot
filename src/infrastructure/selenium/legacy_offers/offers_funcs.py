@@ -121,6 +121,7 @@ def get_living_dates_ai(text: str) -> str:
     # Создаем соответствующий промт
     promt = f'''Проанализируй текст спецпредложения и выдели все диапазоны дат проживания гостей.
                 Верни строго JSON-массив, где каждый элемент — массив из двух строк дат в формате ДД.ММ.ГГГГ, например: [["01.06.2024","10.06.2024"], ...].
+                Если дата начала периода меньше чем сегодняшняя дата, как начальную дату периода возвращай сегодняшнюю.
                 Если дат проживания нет, верни [] без лишнего текста.
                 Текст: {text}'''
     
@@ -144,7 +145,8 @@ def get_living_dates_ai(text: str) -> str:
     try:
         data = json.loads(raw)
         if isinstance(data, list):
-            return [pair for pair in data if isinstance(pair, (list, tuple)) and len(pair) == 2]
+            parsed = [pair for pair in data if isinstance(pair, (list, tuple)) and len(pair) == 2]
+            return parsed
     except Exception:
         pass
     return []
@@ -164,7 +166,7 @@ def extract_date_before_ai(text: str) -> str:
     # Создаем соответствующий промт
     promt = f'''Проанализируй текст спецпредложения и выдели все диапазоны дат бронирования (период, в который можно забронировать).
                 Верни строго JSON-массив, где каждый элемент — массив из двух строк дат в формате ДД.ММ.ГГГГ, например: [["01.05.2024","31.05.2024"], ...].
-                Не возвращай даты из прошлого относительно сегодняшнего дня. Если из текста получается дата раньше сегодня — опусти её или подбери корректный год так, чтобы конец периода был не раньше начала.
+                Если дата начала периода меньше чем сегодняшняя дата, как начальную дату периода возвращай сегодняшнюю.
                 Начало периода должно быть <= конца периода.
                 Если дат бронирования нет, верни [] без лишнего текста.
                 Текст: {text}'''
@@ -255,7 +257,6 @@ def collect_offer_data(browser):
     
     # Находим элемет страницы где вероятно находиться навание оофера и присваиваем его переменной title
     title = browser.find_element(By.CLASS_NAME, 'f-h1')
-    print(f"Получил название спецпредложения: {title.text}")
     
       
     # Добавляем в список строку
@@ -267,7 +268,6 @@ def collect_offer_data(browser):
     
     # С помощью функции получаем формулу расчитывающую стоимость суток
     formula = get_formula(core.text)
-    print(f"Получил формулу расчитывающую стоимость суток")
             
     wait = WebDriverWait(browser, 10)
 
@@ -277,6 +277,7 @@ def collect_offer_data(browser):
     )))
 
     li_elements = ul_element.find_elements(By.TAG_NAME, "li")
+    
 
     # Получаем текст каждого найденного элемента <li>, записывая его в переменную 's'
     for li in li_elements:
@@ -285,47 +286,54 @@ def collect_offer_data(browser):
         lines.append(s)
         
         # Если в строке нашлась категория, присваем ее переменной category
-        if get_category(s):
-            category = get_category(s)
-            print("Получил категории подходящие под спецпредложение")
+        category_result = get_category(s)
+        if category_result:
+            category = category_result
                             
         # Если в строке нашлась информация о суммировании скидок, присваиваем ее перемнной summ_offers
-        if analyze_offers(s):
-            summ_with_loyalty = analyze_offers(s)
-            print(f"Получил информацию о суммировании скидок")
+        summ_with_loyalty_result = analyze_offers(s)
+        if summ_with_loyalty_result:
+            summ_with_loyalty = summ_with_loyalty_result
                 
-        # Формируем единный строку со всей информацией о спецпредложении удаляя из нее не нужные боту строки
-        offer_text = '\n'.join(lines)
-        stop_phrase = ' только при обращении в единый контактный центр по номеру 8 800 550 52 71.'
-        offer_text = offer_text.replace(stop_phrase, '.')
-        print(f"Сформировал единный текст, описывающий спецпредложение")
+    # Формируем единный строку со всей информацией о спецпредложении удаляя из нее не нужные боту строки
+    offer_text = '\n'.join(lines)
+    stop_phrase = ' только при обращении в единый контактный центр по номеру 8 800 550 52 71.'
+    offer_text = offer_text.replace(stop_phrase, '.')
+    print(f"\nТекст специального предложения:\n{offer_text}\n")
+    
+    # Передаем весь текст в функцию, где нейросеть находит минимальное количество дней проживания по офферу
+    min_rest_days = get_min_days(offer_text)
+    
+    living_dates = get_living_dates_ai(offer_text)
+    # Если название оффера "ранее бронирование", форматируем даты под условия спецпредложения
+    if title.text == 'Раннее бронирование':
+        living_dates = early_booking(living_dates)
         
-        # Передаем весь текст в функцию, где нейросеть находит минимальное количество дней проживания по офферу
-        min_rest_days = get_min_days(offer_text)
-        print(f"Получил минимальное количество дней проживания, по спецпредложению")
-        
-        living_dates = get_living_dates_ai(offer_text)
-        print("Извлек даты проживания")
-        # Если название оффера "ранее бронирование", форматируем даты под условия спецпредложения
-        if title.text == 'Раннее бронирование':
-            living_dates = early_booking(living_dates)
-            print(f"Отредактировал даты проживания под условия спец предложения 'Раннее бронирование'")
-            
-        date_before = extract_date_before_ai(offer_text)
-        print(f"Извлек даты бронирования")
-                   
-        offer = {
-            "Название": title.text,  
-            "Категория": category,
-            "Даты проживания": living_dates,
-            "Даты бронирования": date_before,
-            "Формула расчета": formula,
-            "Минимальное количество дней": min_rest_days,
-            "Суммируется с программой лояльности": summ_with_loyalty,
-            "Текст предложения": offer_text
-        }
-        
-        return offer
+    date_before = extract_date_before_ai(offer_text)
+                
+    offer = {
+        "Название": title.text,  
+        "Категория": category,
+        "Даты проживания": living_dates,
+        "Даты бронирования": date_before,
+        "Формула расчета": formula,
+        "Минимальное количество дней": min_rest_days,
+        "Суммируется с программой лояльности": summ_with_loyalty,
+        "Текст предложения": offer_text
+    }
+
+    print(
+        "Итог по собранным параметрам:\n"
+        f"Название: {offer['Название']}\n"
+        f"Категория: {offer['Категория']}\n"
+        f"Период проживания: {offer['Даты проживания']}\n"
+        f"Период бронирования: {offer['Даты бронирования']}\n"
+        f"Формула расчета: {offer['Формула расчета']}\n"
+        f"Минимальное количество дней: {offer['Минимальное количество дней']}\n"
+        f"Суммируется с программой лояльности: {offer['Суммируется с программой лояльности']}\n"
+    )
+    
+    return offer
 
 
     

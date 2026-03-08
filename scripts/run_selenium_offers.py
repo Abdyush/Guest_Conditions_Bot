@@ -21,6 +21,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--visible", action="store_true", help="Run Chrome with GUI.")
     parser.add_argument("--wait-seconds", type=int, default=20)
     parser.add_argument("--fail-fast", action="store_true", help="Stop if some offers fail to map.")
+    parser.add_argument(
+        "--print-only",
+        action="store_true",
+        help="Only print parsed offers, do not write to Postgres.",
+    )
     return parser
 
 
@@ -38,6 +43,7 @@ def main() -> None:
     args = build_parser().parse_args()
 
     from src.infrastructure.sources.selenium_offers_source import SeleniumOffersSource
+    from src.infrastructure.repositories.postgres_offers_repository import PostgresOffersRepository
 
     source = SeleniumOffersSource(
         category_rules_csv_path=args.rules_csv,
@@ -46,6 +52,13 @@ def main() -> None:
         fail_fast=args.fail_fast,
     )
     offers = source.get_offers(date.fromisoformat(args.today))
+
+    if args.print_only:
+        print("[trace] print-only mode: skip writing to Postgres")
+    else:
+        repo = PostgresOffersRepository()
+        repo.replace_all(offers)
+        print(f"[trace] saved to Postgres table 'special_offers': {len(offers)} rows")
 
     print(f"Parsed offers: {len(offers)}")
     print("id;title;discount;min_nights;stay_periods;booking_period;allowed_groups;allowed_categories;loyalty_compatible")
