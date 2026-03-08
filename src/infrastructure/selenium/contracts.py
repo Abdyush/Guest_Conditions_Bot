@@ -11,3 +11,10 @@ class ScrapedCategoryRate:
     breakfast_minor: int
     full_pansion_minor: int
     is_last_room: bool
+
+
+@dataclass(frozen=True, slots=True)
+class ScrapedOffer:
+    source_url: str
+    title: str
+    text: str

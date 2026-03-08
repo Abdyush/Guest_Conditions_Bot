@@ -38,19 +38,23 @@ class SeleniumDailyRatesSource(DailyRatesSourcePort):
         category_to_group, _, _ = load_category_rules(self._category_rules_csv_path)
         options = build_chrome_options(headless=self._headless)
         parsed: list[DailyRate] = []
-
-        with webdriver.Chrome(options=options) as browser:
-            gateway = SeleniumHotelRatesGateway(browser, wait_seconds=self._wait_seconds)
-            current = date_from
-            while current <= date_to:
-                scraped = gateway.get_rates_for_date(current)
-                parsed.extend(
-                    map_scraped_rates_to_domain(
-                        scraped,
-                        category_to_group=category_to_group,
-                        adults_counts=self._adults_counts,
-                    )
+        for adults_count in self._adults_counts:
+            with webdriver.Chrome(options=options) as browser:
+                gateway = SeleniumHotelRatesGateway(
+                    browser,
+                    adults_count=adults_count,
+                    wait_seconds=self._wait_seconds,
                 )
-                current += timedelta(days=1)
+                current = date_from
+                while current <= date_to:
+                    scraped = gateway.get_rates_for_date(current)
+                    parsed.extend(
+                        map_scraped_rates_to_domain(
+                            scraped,
+                            category_to_group=category_to_group,
+                            adults_counts=[adults_count],
+                        )
+                    )
+                    current += timedelta(days=1)
 
         return parsed

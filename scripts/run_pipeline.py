@@ -17,6 +17,7 @@ from src.application.dto.best_date import BestDate
 from src.application.dto.date_line import DateLineDTO
 from src.application.dto.matched_date_record import MatchedDateRecord
 from src.application.ports.daily_rates_source import DailyRatesSourcePort
+from src.application.ports.offers_source import OffersSourcePort
 from src.application.presenters.telegram_notification_presenter import TelegramNotificationPresenter
 from src.application.use_cases.calculate_matches_for_all_guests import CalculateMatchesForAllGuests
 from src.domain.services.date_price_selector import DatePriceSelector
@@ -148,6 +149,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--guests-csv", default=str(ROOT / "data" / "guest_details.csv"))
     parser.add_argument("--rules-csv", default=str(ROOT / "data" / "category_rules.csv"))
     parser.add_argument("--rates-source", choices=("csv", "selenium"), default="csv")
+    parser.add_argument("--offers-source", choices=("csv", "selenium"), default="csv")
     parser.add_argument(
         "--selenium-adults",
         default="1,2,3",
@@ -183,7 +185,19 @@ def main() -> None:
     else:
         rates_source = CsvRatesRepository(rates_csv_path=args.rates_csv)
 
-    csv_offers_repo = CsvOffersRepository(offers_csv_path=args.offers_csv)
+    offers_source: OffersSourcePort
+    if args.offers_source == "selenium":
+        from src.infrastructure.sources.selenium_offers_source import SeleniumOffersSource
+
+        offers_source = SeleniumOffersSource(
+            category_rules_csv_path=args.rules_csv,
+            headless=not args.selenium_visible,
+            wait_seconds=args.selenium_wait_seconds,
+            fail_fast=False,
+        )
+    else:
+        offers_source = CsvOffersRepository(offers_csv_path=args.offers_csv)
+
     csv_guests_repo = CsvGuestsRepository(guests_csv_path=args.guests_csv)
 
     try:
@@ -229,7 +243,7 @@ def main() -> None:
     else:
         synced_rates = rates_source.get_daily_rates(date.min, date.max)
     rates_repo.replace_all(synced_rates)
-    offers_repo.replace_all(csv_offers_repo.get_offers(booking_date))
+    offers_repo.replace_all(offers_source.get_offers(booking_date))
     csv_guests = csv_guests_repo.get_active_guests()
     guests_repo.replace_all(csv_guests)
     for guest in csv_guests:

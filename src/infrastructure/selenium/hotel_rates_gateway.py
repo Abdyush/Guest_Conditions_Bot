@@ -36,8 +36,11 @@ def _find_date_button(dt: date, dates_by_month: dict[str, list], *, checkout: bo
 
 
 class SeleniumHotelRatesGateway:
-    def __init__(self, browser: WebDriver, *, wait_seconds: int = 20):
+    def __init__(self, browser: WebDriver, *, adults_count: int = 1, wait_seconds: int = 20):
+        if adults_count <= 0:
+            raise ValueError("adults_count must be > 0")
         self._browser = browser
+        self._adults_count = adults_count
         self._wait = WebDriverWait(browser, wait_seconds)
         self._open_booking_page()
 
@@ -52,8 +55,24 @@ class SeleniumHotelRatesGateway:
         if len(iframes) < 2:
             raise RuntimeError("Booking iframe not found")
 
-        self._browser.switch_to.frame(iframes[1])
-        container = self._wait.until(EC.presence_of_element_located((By.CLASS_NAME, "page-container")))
+        self._browser.switch_to.frame(iframes[1])  
+        container = self._wait.until(EC.presence_of_element_located((By.CLASS_NAME, "page-container")))  
+        
+        select_adults = container.find_element(By.CLASS_NAME, "x-select__match-icon")
+        select_adults.click()
+        time.sleep(4)
+
+        adults_dropdown = self._wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, "div.x-sd")))
+        time.sleep(1)
+        choices = adults_dropdown.find_elements(By.CSS_SELECTOR, "div.x-sd__choice")
+        target = next((el for el in choices if str(self._adults_count) in el.text), None)
+
+        if target:
+            target.click()
+            time.sleep(1)
+        else:
+            raise RuntimeError(f"Option with {self._adults_count} adults not found")
+        
         buttons = container.find_elements(By.TAG_NAME, "span")
         search_button = next((el for el in buttons if el.text.strip() == "Найти"), None)
         if search_button is None:
