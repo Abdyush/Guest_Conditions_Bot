@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import calendar
 from datetime import date
@@ -68,11 +68,6 @@ def build_period_calendar_keyboard(
             InlineKeyboardButton(text="«", callback_data=f"cal:nav:{prev_month}"),
             InlineKeyboardButton(text=" ", callback_data="cal:noop"),
             InlineKeyboardButton(text="»", callback_data=f"cal:nav:{next_month}"),
-        ]
-    )
-    rows.append(
-        [
-            InlineKeyboardButton(text="Назад", callback_data="nav:back_quotes_group"),
         ]
     )
     return InlineKeyboardMarkup(rows)

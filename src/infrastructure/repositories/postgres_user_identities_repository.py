@@ -102,6 +102,21 @@ class PostgresUserIdentitiesRepository(UserIdentitiesRepository):
         with self._engine.begin() as conn:
             conn.execute(stmt)
 
+    def list_external_user_ids(self, *, provider: str, guest_id: str) -> list[str]:
+        normalized_provider = provider.strip().lower()
+        normalized_guest_id = guest_id.strip()
+        if not normalized_provider or not normalized_guest_id:
+            return []
+
+        stmt = (
+            select(user_identities_table.c.external_user_id)
+            .where(user_identities_table.c.provider == normalized_provider)
+            .where(user_identities_table.c.guest_id == normalized_guest_id)
+        )
+        with self._engine.connect() as conn:
+            rows = conn.execute(stmt).scalars().all()
+        return [str(x) for x in rows if str(x).strip()]
+
     @staticmethod
     def _normalize_external_user_id(*, provider: str, external_user_id: str) -> str:
         raw = external_user_id.strip()

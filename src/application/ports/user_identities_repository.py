@@ -12,3 +12,6 @@ class UserIdentitiesRepository(Protocol):
 
     def delete_identity(self, *, provider: str, external_user_id: str) -> None:
         ...
+
+    def list_external_user_ids(self, *, provider: str, guest_id: str) -> list[str]:
+        ...

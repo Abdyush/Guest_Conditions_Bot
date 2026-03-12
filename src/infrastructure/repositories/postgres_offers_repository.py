@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import os
+import logging
 from datetime import date
 from decimal import Decimal
+from uuid import uuid4
 
 from sqlalchemy import BOOLEAN, INTEGER, TEXT, Column, MetaData, Table, create_engine, select, text
 from sqlalchemy.engine import Engine
@@ -18,6 +20,7 @@ metadata = MetaData()
 offers_table = Table(
     "special_offers",
     metadata,
+    Column("snapshot_id", TEXT, nullable=True),
     Column("id", TEXT, primary_key=True),
     Column("title", TEXT, nullable=False),
     Column("description", TEXT, nullable=False),
@@ -31,6 +34,16 @@ offers_table = Table(
     Column("tariffs", TEXT, nullable=True),
     Column("loyalty_compatible", BOOLEAN, nullable=False),
 )
+
+active_snapshots_table = Table(
+    "active_snapshots",
+    metadata,
+    Column("dataset", TEXT, primary_key=True),
+    Column("snapshot_id", TEXT, nullable=False),
+)
+
+DATASET_KEY = "special_offers"
+logger = logging.getLogger(__name__)
 
 
 def _date_range_to_text(value: DateRange) -> str:
@@ -86,18 +99,34 @@ class PostgresOffersRepository(OffersRepository):
     @staticmethod
     def _init_schema(engine: Engine) -> None:
         metadata.create_all(engine)
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE special_offers ADD COLUMN IF NOT EXISTS snapshot_id TEXT"))
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS active_snapshots(
+                        dataset TEXT PRIMARY KEY,
+                        snapshot_id TEXT NOT NULL
+                    )
+                    """
+                )
+            )
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_special_offers_snapshot ON special_offers(snapshot_id);"))
 
     def replace_all(self, offers: list[Offer]) -> None:
+        if not offers:
+            logger.warning("special_offers_publish_skip reason=empty_rows")
+            return
+        snapshot_id = f"of_{uuid4().hex}"
+        logger.info("special_offers_snapshot_start snapshot_id=%s rows=%s", snapshot_id, len(offers))
         with self._engine.begin() as conn:
-            conn.execute(text("TRUNCATE TABLE special_offers"))
-            if not offers:
-                return
             rows = []
             for offer in offers:
                 discount_type, discount_value = _serialize_discount(offer)
                 rows.append(
                     {
-                        "id": offer.id,
+                        "snapshot_id": snapshot_id,
+                        "id": f"{snapshot_id}|{offer.id}",
                         "title": offer.title,
                         "description": offer.description,
                         "discount_type": discount_type,
@@ -112,10 +141,27 @@ class PostgresOffersRepository(OffersRepository):
                     }
                 )
             conn.execute(offers_table.insert(), rows)
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO active_snapshots(dataset, snapshot_id)
+                    VALUES (:dataset, :snapshot_id)
+                    ON CONFLICT (dataset) DO UPDATE SET snapshot_id = EXCLUDED.snapshot_id
+                    """
+                ),
+                {"dataset": DATASET_KEY, "snapshot_id": snapshot_id},
+            )
+        logger.info("special_offers_snapshot_published snapshot_id=%s", snapshot_id)
 
     def get_offers(self, today: date) -> list[Offer]:
         _ = today
-        stmt = select(offers_table)
+        with self._engine.connect() as conn:
+            active_snapshot_id = self._get_active_snapshot_id(conn)
+        if active_snapshot_id:
+            stmt = select(offers_table).where(offers_table.c.snapshot_id == active_snapshot_id)
+        else:
+            # Backward compatibility for legacy unversioned rows.
+            stmt = select(offers_table)
         out: list[Offer] = []
         with self._engine.connect() as conn:
             for row in conn.execute(stmt).mappings():
@@ -137,3 +183,12 @@ class PostgresOffersRepository(OffersRepository):
                     )
                 )
         return out
+
+    @staticmethod
+    def _get_active_snapshot_id(conn) -> str | None:
+        row = conn.execute(
+            select(active_snapshots_table.c.snapshot_id).where(active_snapshots_table.c.dataset == DATASET_KEY)
+        ).first()
+        if row is None:
+            return None
+        return str(row.snapshot_id)

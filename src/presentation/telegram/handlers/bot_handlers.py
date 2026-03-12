@@ -1,4 +1,4 @@
-﻿
+
 from __future__ import annotations
 
 import logging
@@ -25,6 +25,8 @@ from src.presentation.telegram.keyboards.main_menu import (
     EDIT_GROUPS_BUTTON,
     EDIT_INFANTS_BUTTON,
     EDIT_LOYALTY_BUTTON,
+    MAIN_MENU_BUTTON,
+    SCENARIO_BACK_BUTTON,
     EDIT_PRICE_BUTTON,
     PERIOD_QUOTES_BUTTON,
     build_available_categories_inline_keyboard,
@@ -37,13 +39,18 @@ from src.presentation.telegram.keyboards.main_menu import (
     build_edit_menu_keyboard,
     build_loyalty_keyboard,
     build_main_menu_keyboard,
+    build_notified_categories_inline_keyboard,
+    build_notified_period_details_inline_keyboard,
+    build_notified_periods_inline_keyboard,
     build_numeric_edit_keyboard,
     build_phone_request_keyboard,
     build_quotes_categories_inline_keyboard,
     build_quotes_category_details_inline_keyboard,
     build_quotes_group_inline_keyboard,
+    build_scenario_menu_keyboard,
 )
 from src.presentation.telegram.presenters.message_presenter import render_best_periods, render_period_quotes
+from src.presentation.telegram.services.pipeline_orchestrator import PipelineOrchestrator
 from src.presentation.telegram.services.use_cases_adapter import TelegramUseCasesAdapter
 from src.presentation.telegram.state.conversation_state import ConversationState
 from src.presentation.telegram.state.session_store import InMemorySessionStore, PeriodQuotesDraft, RegistrationDraft
@@ -51,6 +58,13 @@ from src.presentation.telegram.ui_texts import BANK_LABEL_TO_CODE, CATEGORY_LABE
 
 
 logger = logging.getLogger(__name__)
+
+MAIN_MENU_ACTION_BUTTONS = {
+    EDIT_DATA_BUTTON,
+    AVAILABLE_ROOMS_BUTTON,
+    PERIOD_QUOTES_BUTTON,
+    BEST_PERIOD_BUTTON,
+}
 
 
 class AvailablePeriod(NamedTuple):
@@ -61,35 +75,73 @@ class AvailablePeriod(NamedTuple):
 
 
 class TelegramBotHandlers:
-    def __init__(self, *, adapter: TelegramUseCasesAdapter, sessions: InMemorySessionStore):
+    def __init__(self, *, adapter: TelegramUseCasesAdapter, sessions: InMemorySessionStore, pipeline: PipelineOrchestrator):
         self._adapter = adapter
         self._sessions = sessions
+        self._pipeline = pipeline
 
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         user = update.effective_user
         message = update.effective_message
         if user is None or message is None:
             return
-        logger.info("telegram_update type=start user_id=%s", user.id)
+        try:
+            logger.info("telegram_update type=start user_id=%s", user.id)
 
-        guest_id = self._adapter.resolve_guest_id(telegram_user_id=user.id)
-        if guest_id:
-            self._sessions.reset(user.id)
-            await self._send_main_menu_for_guest(message=message, guest_id=guest_id)
-            return
+            guest_id = self._adapter.resolve_guest_id(telegram_user_id=user.id)
+            if guest_id:
+                await self._sessions.reset(user.id)
+                await self._send_main_menu_for_guest(message=message, guest_id=guest_id)
+                return
 
-        self._sessions.set_state(user.id, ConversationState.AWAIT_PHONE_CONTACT)
-        self._sessions.get(user.id).registration = None
-        await message.reply_text(msg("ask_phone"), reply_markup=build_phone_request_keyboard())
+            await self._sessions.set_state(user.id, ConversationState.AWAIT_PHONE_CONTACT)
+            session = await self._sessions.get(user.id)
+            session.registration = None
+            await message.reply_text(msg("ask_phone"), reply_markup=build_phone_request_keyboard())
+        finally:
+            await self._sessions.persist(user.id)
 
     async def unlink(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         user = update.effective_user
         message = update.effective_message
         if user is None or message is None:
             return
-        self._adapter.unbind_telegram(telegram_user_id=user.id)
-        self._sessions.reset(user.id)
-        await message.reply_text(msg("unlink_done"), reply_markup=build_phone_request_keyboard())
+        try:
+            self._adapter.unbind_telegram(telegram_user_id=user.id)
+            await self._sessions.reset(user.id)
+            await message.reply_text(msg("unlink_done"), reply_markup=build_phone_request_keyboard())
+        finally:
+            await self._sessions.persist(user.id)
+
+    async def parser_categ(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        user = update.effective_user
+        message = update.effective_message
+        if user is None or message is None:
+            return
+        logger.info("telegram_update type=command user_id=%s command=/parser_categ", user.id)
+        attempt = await self._pipeline.run_categories_parser(trigger=f"manual:telegram:{user.id}")
+        if not attempt.started:
+            if attempt.message.startswith("busy:"):
+                await message.reply_text("Запуск отклонен: уже выполняется другой процесс.")
+                return
+            await message.reply_text("Ошибка запуска парсера цен. Проверьте логи.")
+            return
+        await message.reply_text("Парсер цен завершен успешно.")
+
+    async def parser_offer(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        user = update.effective_user
+        message = update.effective_message
+        if user is None or message is None:
+            return
+        logger.info("telegram_update type=command user_id=%s command=/parser_offer", user.id)
+        attempt = await self._pipeline.run_offers_parser(trigger=f"manual:telegram:{user.id}")
+        if not attempt.started:
+            if attempt.message.startswith("busy:"):
+                await message.reply_text("Запуск отклонен: уже выполняется другой процесс.")
+                return
+            await message.reply_text("Ошибка запуска парсера спецпредложений. Проверьте логи.")
+            return
+        await message.reply_text("Парсер спецпредложений завершен успешно.")
 
     async def on_contact(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         user = update.effective_user
@@ -100,15 +152,17 @@ class TelegramBotHandlers:
 
         if message.contact.user_id is not None and message.contact.user_id != user.id:
             await message.reply_text(msg("send_own_phone"), reply_markup=build_phone_request_keyboard())
+            await self._sessions.persist(user.id)
             return
 
         guest_id = self._adapter.bind_by_phone(telegram_user_id=user.id, phone=message.contact.phone_number)
         if guest_id:
-            self._sessions.reset(user.id)
+            await self._sessions.reset(user.id)
             await self._send_main_menu_for_guest(message=message, guest_id=guest_id)
+            await self._sessions.persist(user.id)
             return
 
-        session = self._sessions.get(user.id)
+        session = await self._sessions.get(user.id)
         session.registration = RegistrationDraft(
             phone=message.contact.phone_number,
             name=self._telegram_profile_name(user),
@@ -116,6 +170,7 @@ class TelegramBotHandlers:
         )
         session.state = ConversationState.AWAIT_REG_ADULTS
         await message.reply_text(msg("registration_start"), reply_markup=build_numeric_edit_keyboard())
+        await self._sessions.persist(user.id)
 
     async def on_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         query = update.callback_query
@@ -128,7 +183,7 @@ class TelegramBotHandlers:
         if data == "nav:main":
             await query.answer()
             guest_id = self._adapter.resolve_guest_id(telegram_user_id=user.id)
-            self._sessions.reset(user.id)
+            await self._sessions.reset(user.id)
             if guest_id and query.message is not None:
                 await self._send_main_menu_for_guest(message=query.message, guest_id=guest_id)
             return
@@ -140,20 +195,20 @@ class TelegramBotHandlers:
             return
         if data == "nav:back_quotes_group":
             await query.answer()
-            session = self._sessions.get(user.id)
+            session = await self._sessions.get(user.id)
             session.state = ConversationState.AWAIT_QUOTES_GROUP
             if query.message is not None:
                 await query.edit_message_text(msg("ask_quotes_group"), reply_markup=build_quotes_group_inline_keyboard())
             return
         if data == "nav:back_best_groups":
             await query.answer()
-            self._sessions.set_state(user.id, ConversationState.AWAIT_BEST_GROUP_ID)
+            await self._sessions.set_state(user.id, ConversationState.AWAIT_BEST_GROUP_ID)
             if query.message is not None:
                 await query.edit_message_text(msg("ask_best_group"), reply_markup=build_best_group_inline_keyboard())
             return
         if data == "nav:back_avail_categories":
             await query.answer()
-            session = self._sessions.get(user.id)
+            session = await self._sessions.get(user.id)
             categories = session.available_category_names or []
             if query.message is not None:
                 await query.edit_message_text(
@@ -161,9 +216,26 @@ class TelegramBotHandlers:
                     reply_markup=build_available_categories_inline_keyboard(category_names=categories),
                 )
             return
+        if data == "nav:back_notif_categories":
+            await query.answer()
+            guest_id = self._adapter.resolve_guest_id(telegram_user_id=user.id)
+            if not guest_id:
+                if query.message is not None:
+                    await query.message.reply_text(msg("auth_required"), reply_markup=build_phone_request_keyboard())
+                return
+            categories = self._adapter.get_available_categories(guest_id=guest_id)
+            if query.message is not None:
+                if not categories:
+                    await query.edit_message_text(msg("available_none"), reply_markup=build_numeric_edit_keyboard())
+                else:
+                    await query.edit_message_text(
+                        "Дорогой гость, по вашим условиям подошли следующие категории:",
+                        reply_markup=build_notified_categories_inline_keyboard(category_names=categories),
+                    )
+            return
         if data == "nav:back_quotes_calendar":
             await query.answer()
-            session = self._sessions.get(user.id)
+            session = await self._sessions.get(user.id)
             draft = session.period_quotes
             if draft is None or draft.month_cursor is None:
                 return
@@ -180,7 +252,7 @@ class TelegramBotHandlers:
             return
         if data == "nav:back_quotes_categories":
             await query.answer()
-            session = self._sessions.get(user.id)
+            session = await self._sessions.get(user.id)
             draft = session.period_quotes
             if draft is None:
                 return
@@ -214,6 +286,15 @@ class TelegramBotHandlers:
         if data.startswith("regcat:"):
             await self._handle_categories_callback(user.id, query, data)
             return
+        if data.startswith("ncat:"):
+            await self._handle_notified_category_callback(user.id, query, data)
+            return
+        if data.startswith("nprd:"):
+            await self._handle_notified_period_callback(user.id, query, data)
+            return
+        if data.startswith("noff:"):
+            await self._handle_notified_offer_callback(user.id, query, data)
+            return
 
         await query.answer()
     async def on_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -225,13 +306,26 @@ class TelegramBotHandlers:
         logger.info("telegram_update type=text user_id=%s text=%s", user.id, text)
 
         if text == CANCEL_BUTTON:
-            self._sessions.reset(user.id)
+            await self._sessions.reset(user.id)
             await message.reply_text(msg("cancelled"), reply_markup=build_main_menu_keyboard())
             return
 
-        session = self._sessions.get(user.id)
-        if text == BACK_BUTTON:
+        session = await self._sessions.get(user.id)
+        if text == MAIN_MENU_BUTTON:
+            await self._sessions.reset(user.id)
+            guest_id = self._adapter.resolve_guest_id(telegram_user_id=user.id)
+            if guest_id:
+                await self._send_main_menu_for_guest(message=message, guest_id=guest_id)
+            else:
+                await self._sessions.set_state(user.id, ConversationState.AWAIT_PHONE_CONTACT)
+                await message.reply_text(msg("ask_phone"), reply_markup=build_phone_request_keyboard())
+            return
+
+        if text == BACK_BUTTON or text == SCENARIO_BACK_BUTTON:
             await self._handle_back(user.id, message)
+            return
+
+        if session.state != ConversationState.IDLE and text in MAIN_MENU_ACTION_BUTTONS:
             return
 
         if text == EDIT_DATA_BUTTON:
@@ -240,17 +334,21 @@ class TelegramBotHandlers:
             return
 
         if text == AVAILABLE_ROOMS_BUTTON:
+            await message.reply_text(msg("menu_hint"), reply_markup=build_scenario_menu_keyboard())
             await self._open_available_categories(user.id, message)
             return
 
         if text == BEST_PERIOD_BUTTON:
-            self._sessions.set_state(user.id, ConversationState.AWAIT_BEST_GROUP_ID)
+            await self._sessions.set_state(user.id, ConversationState.AWAIT_BEST_GROUP_ID)
+            await message.reply_text(msg("menu_hint"), reply_markup=build_scenario_menu_keyboard())
             await message.reply_text(msg("ask_best_group"), reply_markup=build_best_group_inline_keyboard())
             return
 
         if text == PERIOD_QUOTES_BUTTON:
-            self._sessions.set_state(user.id, ConversationState.AWAIT_QUOTES_GROUP)
-            self._sessions.get(user.id).period_quotes = None
+            await self._sessions.set_state(user.id, ConversationState.AWAIT_QUOTES_GROUP)
+            session_for_quotes = await self._sessions.get(user.id)
+            session_for_quotes.period_quotes = None
+            await message.reply_text(msg("menu_hint"), reply_markup=build_scenario_menu_keyboard())
             await message.reply_text(msg("ask_quotes_group"), reply_markup=build_quotes_group_inline_keyboard())
             return
 
@@ -294,11 +392,42 @@ class TelegramBotHandlers:
         await message.reply_text(msg("menu_hint"), reply_markup=build_main_menu_keyboard())
 
     async def _handle_back(self, telegram_user_id: int, message) -> None:
-        session = self._sessions.get(telegram_user_id)
+        session = await self._sessions.get(telegram_user_id)
         guest_id = self._adapter.resolve_guest_id(telegram_user_id=telegram_user_id)
         if not guest_id:
             session.state = ConversationState.AWAIT_PHONE_CONTACT
             await message.reply_text(msg("ask_phone"), reply_markup=build_phone_request_keyboard())
+            return
+
+        if session.state == ConversationState.AWAIT_REG_CHILDREN_4_13:
+            session.state = ConversationState.AWAIT_REG_ADULTS
+            await message.reply_text(msg("reg_step_2"), reply_markup=build_numeric_edit_keyboard())
+            return
+        if session.state == ConversationState.AWAIT_REG_INFANTS_0_3:
+            session.state = ConversationState.AWAIT_REG_CHILDREN_4_13
+            await message.reply_text(msg("reg_step_3"), reply_markup=build_numeric_edit_keyboard())
+            return
+        if session.state == ConversationState.AWAIT_REG_GROUPS:
+            session.state = ConversationState.AWAIT_REG_INFANTS_0_3
+            await message.reply_text(msg("reg_step_4"), reply_markup=build_numeric_edit_keyboard())
+            return
+        if session.state == ConversationState.AWAIT_REG_LOYALTY:
+            session.state = ConversationState.AWAIT_REG_GROUPS
+            reg = session.registration
+            selected = reg.allowed_groups if reg and reg.allowed_groups else set()
+            await message.reply_text(msg("reg_step_5"), reply_markup=build_categories_inline_keyboard(selected_codes=selected))
+            return
+        if session.state == ConversationState.AWAIT_REG_BANK:
+            session.state = ConversationState.AWAIT_REG_LOYALTY
+            await message.reply_text(msg("reg_step_6"), reply_markup=build_loyalty_keyboard())
+            return
+        if session.state == ConversationState.AWAIT_REG_DESIRED_PRICE:
+            session.state = ConversationState.AWAIT_REG_BANK
+            await message.reply_text(msg("reg_step_7"), reply_markup=build_bank_keyboard())
+            return
+        if session.state == ConversationState.AWAIT_REG_ADULTS:
+            await self._sessions.reset(telegram_user_id)
+            await self._send_main_menu_for_guest(message=message, guest_id=guest_id)
             return
 
         if session.state in {
@@ -314,11 +443,45 @@ class TelegramBotHandlers:
             await message.reply_text(msg("edit_pick_field"), reply_markup=build_edit_menu_keyboard())
             return
 
-        self._sessions.reset(telegram_user_id)
+        if session.state == ConversationState.EDIT_MENU:
+            await self._sessions.reset(telegram_user_id)
+            await self._send_main_menu_for_guest(message=message, guest_id=guest_id)
+            return
+
+        if session.state == ConversationState.AWAIT_QUOTES_CATEGORY:
+            draft = session.period_quotes
+            if draft is not None and draft.month_cursor is not None:
+                session.state = ConversationState.AWAIT_QUOTES_CALENDAR
+                await message.reply_text(
+                    msg("ask_quotes_calendar"),
+                    reply_markup=build_period_calendar_keyboard(
+                        month_cursor=draft.month_cursor,
+                        checkin=draft.checkin,
+                        checkout=draft.checkout,
+                    ),
+                )
+                return
+
+        if session.state == ConversationState.AWAIT_QUOTES_CALENDAR:
+            session.state = ConversationState.AWAIT_QUOTES_GROUP
+            await message.reply_text(msg("ask_quotes_group"), reply_markup=build_quotes_group_inline_keyboard())
+            return
+
+        if session.state == ConversationState.AWAIT_QUOTES_GROUP:
+            await self._sessions.reset(telegram_user_id)
+            await self._send_main_menu_for_guest(message=message, guest_id=guest_id)
+            return
+
+        if session.state == ConversationState.AWAIT_BEST_GROUP_ID:
+            await self._sessions.reset(telegram_user_id)
+            await self._send_main_menu_for_guest(message=message, guest_id=guest_id)
+            return
+
+        await self._sessions.reset(telegram_user_id)
         await self._send_main_menu_for_guest(message=message, guest_id=guest_id)
 
     async def _handle_registration_step(self, telegram_user_id: int, text: str, message) -> None:
-        session = self._sessions.get(telegram_user_id)
+        session = await self._sessions.get(telegram_user_id)
         reg = session.registration
         if reg is None:
             session.state = ConversationState.AWAIT_PHONE_CONTACT
@@ -401,14 +564,14 @@ class TelegramBotHandlers:
         except Exception:
             logger.exception("registration_failed user_id=%s", telegram_user_id)
             await message.reply_text(msg("registration_failed"))
-            self._sessions.reset(telegram_user_id)
+            await self._sessions.reset(telegram_user_id)
             return
 
-        self._sessions.reset(telegram_user_id)
+        await self._sessions.reset(telegram_user_id)
         await self._send_main_menu_for_guest(message=message, guest_id=guest_id)
 
     async def _handle_edit_step(self, telegram_user_id: int, text: str, message) -> None:
-        session = self._sessions.get(telegram_user_id)
+        session = await self._sessions.get(telegram_user_id)
         guest_id = self._adapter.resolve_guest_id(telegram_user_id=telegram_user_id)
         if not guest_id:
             session.state = ConversationState.AWAIT_PHONE_CONTACT
@@ -498,7 +661,7 @@ class TelegramBotHandlers:
     async def _handle_best_group_callback(self, telegram_user_id: int, query, data: str) -> None:
         guest_id = self._adapter.resolve_guest_id(telegram_user_id=telegram_user_id)
         if not guest_id:
-            self._sessions.set_state(telegram_user_id, ConversationState.AWAIT_PHONE_CONTACT)
+            await self._sessions.set_state(telegram_user_id, ConversationState.AWAIT_PHONE_CONTACT)
             await query.answer()
             if query.message is not None:
                 await query.message.reply_text(msg("auth_required"), reply_markup=build_phone_request_keyboard())
@@ -513,7 +676,7 @@ class TelegramBotHandlers:
             await query.answer()
             if query.message is not None:
                 await query.message.reply_text(msg("best_period_failed"))
-            self._sessions.reset(telegram_user_id)
+            await self._sessions.reset(telegram_user_id)
             return
 
         await query.answer()
@@ -523,14 +686,14 @@ class TelegramBotHandlers:
     async def _handle_quotes_group_callback(self, telegram_user_id: int, query, data: str) -> None:
         guest_id = self._adapter.resolve_guest_id(telegram_user_id=telegram_user_id)
         if not guest_id:
-            self._sessions.set_state(telegram_user_id, ConversationState.AWAIT_PHONE_CONTACT)
+            await self._sessions.set_state(telegram_user_id, ConversationState.AWAIT_PHONE_CONTACT)
             await query.answer()
             if query.message is not None:
                 await query.message.reply_text(msg("auth_required"), reply_markup=build_phone_request_keyboard())
             return
 
         group_id = data.split(":", 1)[1].strip().upper()
-        session = self._sessions.get(telegram_user_id)
+        session = await self._sessions.get(telegram_user_id)
         session.state = ConversationState.AWAIT_QUOTES_CALENDAR
         session.period_quotes = PeriodQuotesDraft(
             group_id=group_id,
@@ -548,7 +711,7 @@ class TelegramBotHandlers:
             ),
         )
     async def _handle_calendar_callback(self, telegram_user_id: int, query, data: str) -> None:
-        session = self._sessions.get(telegram_user_id)
+        session = await self._sessions.get(telegram_user_id)
         draft = session.period_quotes
         if session.state != ConversationState.AWAIT_QUOTES_CALENDAR or draft is None or draft.group_id is None or draft.month_cursor is None:
             await query.answer()
@@ -626,7 +789,7 @@ class TelegramBotHandlers:
     async def _finish_period_quotes_by_calendar(self, *, telegram_user_id: int, query, group_id: str, period_start: date, period_end: date) -> None:
         guest_id = self._adapter.resolve_guest_id(telegram_user_id=telegram_user_id)
         if not guest_id:
-            self._sessions.set_state(telegram_user_id, ConversationState.AWAIT_PHONE_CONTACT)
+            await self._sessions.set_state(telegram_user_id, ConversationState.AWAIT_PHONE_CONTACT)
             if query.message is not None:
                 await query.message.reply_text(msg("auth_required"), reply_markup=build_phone_request_keyboard())
             return
@@ -652,10 +815,10 @@ class TelegramBotHandlers:
             logger.exception("period_quotes_failed user_id=%s guest_id=%s", telegram_user_id, guest_id)
             if query.message is not None:
                 await query.message.reply_text(msg("period_quotes_failed"))
-            self._sessions.reset(telegram_user_id)
+            await self._sessions.reset(telegram_user_id)
             return
 
-        session = self._sessions.get(telegram_user_id)
+        session = await self._sessions.get(telegram_user_id)
         draft = session.period_quotes
         if draft is None:
             draft = PeriodQuotesDraft()
@@ -673,9 +836,9 @@ class TelegramBotHandlers:
             if not draft.category_names:
                 await query.message.reply_text(
                     f"Нет вариантов на период {period_start.isoformat()} - {period_end.isoformat()}.",
-                    reply_markup=build_main_menu_keyboard(),
+                    reply_markup=build_numeric_edit_keyboard(),
                 )
-                self._sessions.reset(telegram_user_id)
+                await self._sessions.reset(telegram_user_id)
                 return
             await query.edit_message_text(
                 text="Выберите категорию:",
@@ -690,7 +853,7 @@ class TelegramBotHandlers:
                 await query.message.reply_text(msg("auth_required"), reply_markup=build_phone_request_keyboard())
             return
 
-        session = self._sessions.get(telegram_user_id)
+        session = await self._sessions.get(telegram_user_id)
         draft = session.period_quotes
         if session.state != ConversationState.AWAIT_QUOTES_CATEGORY or draft is None:
             await query.answer()
@@ -733,11 +896,11 @@ class TelegramBotHandlers:
             await message.reply_text(msg("auth_required"), reply_markup=build_phone_request_keyboard())
             return
         categories = self._adapter.get_available_categories(guest_id=guest_id)
-        session = self._sessions.get(telegram_user_id)
+        session = await self._sessions.get(telegram_user_id)
         session.available_category_names = categories
         session.available_category_rows = None
         if not categories:
-            await message.reply_text(msg("available_none"), reply_markup=build_main_menu_keyboard())
+            await message.reply_text(msg("available_none"), reply_markup=build_numeric_edit_keyboard())
             return
         await message.reply_text(msg("available_pick_category"), reply_markup=build_available_categories_inline_keyboard(category_names=categories))
 
@@ -749,7 +912,7 @@ class TelegramBotHandlers:
                 await query.message.reply_text(msg("auth_required"), reply_markup=build_phone_request_keyboard())
             return
 
-        session = self._sessions.get(telegram_user_id)
+        session = await self._sessions.get(telegram_user_id)
         categories = session.available_category_names or []
         try:
             idx = int(data.split(":", 1)[1])
@@ -784,7 +947,7 @@ class TelegramBotHandlers:
                 await query.message.reply_text(msg("auth_required"), reply_markup=build_phone_request_keyboard())
             return
 
-        session = self._sessions.get(telegram_user_id)
+        session = await self._sessions.get(telegram_user_id)
         categories = session.available_category_names or []
         parts = data.split(":")
         if len(parts) != 3:
@@ -824,8 +987,152 @@ class TelegramBotHandlers:
                 reply_markup=build_available_period_details_inline_keyboard(category_idx=category_idx),
             )
 
+    async def _handle_notified_category_callback(self, telegram_user_id: int, query, data: str) -> None:
+        guest_id = self._adapter.resolve_guest_id(telegram_user_id=telegram_user_id)
+        if not guest_id:
+            await query.answer()
+            if query.message is not None:
+                await query.message.reply_text(msg("auth_required"), reply_markup=build_phone_request_keyboard())
+            return
+
+        try:
+            category_idx = int(data.split(":", 1)[1])
+        except ValueError:
+            await query.answer()
+            return
+
+        categories = self._adapter.get_available_categories(guest_id=guest_id)
+        if category_idx < 0 or category_idx >= len(categories):
+            await query.answer()
+            return
+
+        category_name = categories[category_idx]
+        _, rows = self._adapter.get_category_matches(guest_id=guest_id, category_name=category_name)
+        periods = self._build_available_periods(rows=rows)
+
+        await query.answer()
+        if query.message is not None:
+            if not periods:
+                await query.edit_message_text(
+                    f"{category_name}\n\nПериоды проживания:\nНет данных.",
+                    reply_markup=build_notified_categories_inline_keyboard(category_names=categories),
+                )
+                return
+            labels = [
+                self._format_period_button_label(start=p.start, end=p.end, price_minor=p.min_new_price_minor)
+                for p in periods
+            ]
+            await query.edit_message_text(
+                self._render_available_category_periods(category_name=category_name, periods=periods),
+                reply_markup=build_notified_periods_inline_keyboard(category_idx=category_idx, periods=labels),
+            )
+
+    async def _handle_notified_period_callback(self, telegram_user_id: int, query, data: str) -> None:
+        guest_id = self._adapter.resolve_guest_id(telegram_user_id=telegram_user_id)
+        if not guest_id:
+            await query.answer()
+            if query.message is not None:
+                await query.message.reply_text(msg("auth_required"), reply_markup=build_phone_request_keyboard())
+            return
+
+        parts = data.split(":")
+        if len(parts) != 3:
+            await query.answer()
+            return
+        try:
+            category_idx = int(parts[1])
+            period_idx = int(parts[2])
+        except ValueError:
+            await query.answer()
+            return
+
+        categories = self._adapter.get_available_categories(guest_id=guest_id)
+        if category_idx < 0 or category_idx >= len(categories):
+            await query.answer()
+            return
+
+        category_name = categories[category_idx]
+        _, rows = self._adapter.get_category_matches(guest_id=guest_id, category_name=category_name)
+        periods = self._build_available_periods(rows=rows)
+        if period_idx < 0 or period_idx >= len(periods):
+            await query.answer()
+            return
+
+        period = periods[period_idx]
+        last_room_dates = self._adapter.get_last_room_dates(
+            guest_id=guest_id,
+            category_name=category_name,
+            period_start=period.start,
+            period_end=period.end,
+            tariffs={x.tariff for x in period.rows},
+        )
+        has_offer = any((x.offer_id or x.offer_title) for x in period.rows)
+
+        await query.answer()
+        if query.message is not None:
+            await query.edit_message_text(
+                self._render_available_period_details(category_name=category_name, period=period, last_room_dates=last_room_dates),
+                reply_markup=build_notified_period_details_inline_keyboard(
+                    category_idx=category_idx,
+                    period_idx=period_idx,
+                    has_offer_text=has_offer,
+                ),
+            )
+
+    async def _handle_notified_offer_callback(self, telegram_user_id: int, query, data: str) -> None:
+        guest_id = self._adapter.resolve_guest_id(telegram_user_id=telegram_user_id)
+        if not guest_id:
+            await query.answer()
+            if query.message is not None:
+                await query.message.reply_text(msg("auth_required"), reply_markup=build_phone_request_keyboard())
+            return
+
+        parts = data.split(":")
+        if len(parts) != 3:
+            await query.answer()
+            return
+        try:
+            category_idx = int(parts[1])
+            period_idx = int(parts[2])
+        except ValueError:
+            await query.answer()
+            return
+
+        categories = self._adapter.get_available_categories(guest_id=guest_id)
+        if category_idx < 0 or category_idx >= len(categories):
+            await query.answer()
+            return
+        category_name = categories[category_idx]
+
+        _, rows = self._adapter.get_category_matches(guest_id=guest_id, category_name=category_name)
+        periods = self._build_available_periods(rows=rows)
+        if period_idx < 0 or period_idx >= len(periods):
+            await query.answer()
+            return
+        period = periods[period_idx]
+
+        row_with_offer = next((x for x in period.rows if x.offer_id or x.offer_title), None)
+        if row_with_offer is None:
+            await query.answer("Текст специального предложения не найден.", show_alert=False)
+            return
+
+        offer_text = self._adapter.get_offer_text(offer_id=row_with_offer.offer_id, offer_title=row_with_offer.offer_title)
+        if not offer_text:
+            offer_text = "Текст специального предложения недоступен."
+
+        await query.answer()
+        if query.message is not None:
+            await query.edit_message_text(
+                offer_text,
+                reply_markup=build_notified_period_details_inline_keyboard(
+                    category_idx=category_idx,
+                    period_idx=period_idx,
+                    has_offer_text=True,
+                ),
+            )
+
     async def _handle_categories_callback(self, telegram_user_id: int, query, data: str) -> None:
-        session = self._sessions.get(telegram_user_id)
+        session = await self._sessions.get(telegram_user_id)
         reg = session.registration
         if session.state not in {ConversationState.AWAIT_REG_GROUPS, ConversationState.EDIT_GROUPS} or reg is None:
             await query.answer()
@@ -868,29 +1175,36 @@ class TelegramBotHandlers:
     async def _send_main_menu_for_guest(self, *, message, guest_id: str) -> None:
         profile = self._adapter.get_guest_profile(guest_id=guest_id)
         if profile is None:
-            await message.reply_text(msg("profile_not_found"), reply_markup=build_main_menu_keyboard())
+            user = getattr(message, "from_user", None)
+            if user is not None and getattr(user, "id", None) is not None:
+                self._adapter.unbind_telegram(telegram_user_id=user.id)
+                await self._sessions.set_state(user.id, ConversationState.AWAIT_PHONE_CONTACT)
+            await message.reply_text(
+                f"{msg('profile_not_found')}\n{msg('ask_phone')}",
+                reply_markup=build_phone_request_keyboard(),
+            )
             return
         await message.reply_text(self._render_profile(profile), reply_markup=build_main_menu_keyboard())
 
     def _render_profile(self, profile: GuestPreferences) -> str:
         code_to_label = {v: k for k, v in CATEGORY_LABEL_TO_CODE.items()}
         groups = sorted(profile.effective_allowed_groups or set())
-        group_lines = [f" • {code_to_label.get(g, g)}" for g in groups] if groups else [" • —"]
-        loyalty = profile.loyalty_status.value.capitalize() if profile.loyalty_status else "—"
-        bank = profile.bank_status.value if profile.bank_status else "нет"
+        group_lines = [f" - {code_to_label.get(g, g)}" for g in groups] if groups else [" - \u2014"]
+        loyalty = profile.loyalty_status.value.capitalize() if profile.loyalty_status else "\u2014"
+        bank = profile.bank_status.value if profile.bank_status else "\u043d\u0435\u0442"
         desired = profile.desired_price_per_night.round_rubles()
-        name = profile.guest_name or "Гость"
+        name = profile.guest_name or "\u0413\u043e\u0441\u0442\u044c"
         return (
-            "Ваши данные:\n"
-            f" Имя: {name}\n"
-            f" Взрослых: {profile.occupancy.adults}\n"
-            f" Детей 4–17: {profile.occupancy.children_4_13}\n"
-            f" Детей 0–3: {profile.occupancy.infants}\n"
-            " Категории:\n"
+            "\u0412\u0430\u0448\u0438 \u0434\u0430\u043d\u043d\u044b\u0435:\n"
+            f" \u0418\u043c\u044f: {name}\n"
+            f" \u0412\u0437\u0440\u043e\u0441\u043b\u044b\u0445: {profile.occupancy.adults}\n"
+            f" \u0414\u0435\u0442\u0435\u0439 4\u201317: {profile.occupancy.children_4_13}\n"
+            f" \u0414\u0435\u0442\u0435\u0439 0\u20133: {profile.occupancy.infants}\n"
+            " \u041a\u0430\u0442\u0435\u0433\u043e\u0440\u0438\u0438:\n"
             f"{chr(10).join(group_lines)}\n"
-            f" Статус лояльности: {loyalty}\n"
-            f" Статус в Сбере: {bank}\n"
-            f" Желаемая цена: {desired} ₽"
+            f" \u0421\u0442\u0430\u0442\u0443\u0441 \u043b\u043e\u044f\u043b\u044c\u043d\u043e\u0441\u0442\u0438: {loyalty}\n"
+            f" \u0421\u0442\u0430\u0442\u0443\u0441 \u0432 \u0421\u0431\u0435\u0440\u0435: {bank}\n"
+            f" \u0416\u0435\u043b\u0430\u0435\u043c\u0430\u044f \u0446\u0435\u043d\u0430: {desired} \u20bd"
         )
 
     def _render_available_category_periods(self, *, category_name: str, periods: list[AvailablePeriod]) -> str:
@@ -1028,3 +1342,5 @@ class TelegramBotHandlers:
         if username:
             return username
         return "Guest"
+
+

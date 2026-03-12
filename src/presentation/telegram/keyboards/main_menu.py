@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from datetime import date
 
@@ -12,6 +12,8 @@ PERIOD_QUOTES_BUTTON = BUTTONS["period_quotes"]
 AVAILABLE_ROOMS_BUTTON = BUTTONS["available_rooms"]
 EDIT_DATA_BUTTON = BUTTONS["edit_data"]
 BACK_BUTTON = BUTTONS["back"]
+MAIN_MENU_BUTTON = BUTTONS["main_menu"]
+SCENARIO_BACK_BUTTON = "Предыдущий шаг"
 CANCEL_BUTTON = BUTTONS["cancel"]
 SHARE_PHONE_BUTTON = BUTTONS["share_phone"]
 
@@ -61,6 +63,16 @@ def build_phone_request_keyboard() -> ReplyKeyboardMarkup:
     )
 
 
+def build_scenario_menu_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text=SCENARIO_BACK_BUTTON)],
+            [KeyboardButton(text=MAIN_MENU_BUTTON)],
+        ],
+        resize_keyboard=True,
+    )
+
+
 def build_categories_inline_keyboard(*, selected_codes: set[str]) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
     for label, code in CATEGORY_LABEL_TO_CODE.items():
@@ -74,7 +86,6 @@ def build_best_group_inline_keyboard() -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
     for label, code in CATEGORY_LABEL_TO_CODE.items():
         rows.append([InlineKeyboardButton(text=label, callback_data=f"bestgrp:{code}")])
-    rows.append([InlineKeyboardButton(text=BACK_BUTTON, callback_data="nav:back_main")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -87,7 +98,6 @@ def build_quotes_group_inline_keyboard() -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
     for label, code in CATEGORY_LABEL_TO_CODE.items():
         rows.append([InlineKeyboardButton(text=label, callback_data=f"qgrp:{code}")])
-    rows.append([InlineKeyboardButton(text=BACK_BUTTON, callback_data="nav:back_main")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -95,7 +105,6 @@ def build_quotes_categories_inline_keyboard(*, category_names: list[str]) -> Inl
     rows: list[list[InlineKeyboardButton]] = []
     for idx, name in enumerate(category_names):
         rows.append([InlineKeyboardButton(text=name, callback_data=f"qcat:{idx}")])
-    rows.append([InlineKeyboardButton(text=BACK_BUTTON, callback_data="nav:back_quotes_calendar")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -109,7 +118,6 @@ def build_available_categories_inline_keyboard(*, category_names: list[str]) -> 
     rows: list[list[InlineKeyboardButton]] = []
     for idx, name in enumerate(category_names):
         rows.append([InlineKeyboardButton(text=name, callback_data=f"availcat:{idx}")])
-    rows.append([InlineKeyboardButton(text=BACK_BUTTON, callback_data="nav:back_main")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -125,6 +133,35 @@ def build_available_period_details_inline_keyboard(*, category_idx: int) -> Inli
     return InlineKeyboardMarkup(
         [[InlineKeyboardButton(text=BACK_BUTTON, callback_data=f"availcat:{category_idx}")]]
     )
+
+
+def build_notified_categories_inline_keyboard(*, category_names: list[str]) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    for idx, name in enumerate(category_names):
+        rows.append([InlineKeyboardButton(text=name, callback_data=f"ncat:{idx}")])
+    return InlineKeyboardMarkup(rows)
+
+
+def build_notified_periods_inline_keyboard(*, category_idx: int, periods: list[str]) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    for idx, label in enumerate(periods):
+        rows.append([InlineKeyboardButton(text=label, callback_data=f"nprd:{category_idx}:{idx}")])
+    rows.append([InlineKeyboardButton(text=BACK_BUTTON, callback_data="nav:back_notif_categories")])
+    return InlineKeyboardMarkup(rows)
+
+
+def build_notified_period_details_inline_keyboard(
+    *,
+    category_idx: int,
+    period_idx: int,
+    has_offer_text: bool,
+) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    if has_offer_text:
+        rows.append([InlineKeyboardButton(text="Текст специального предложения", callback_data=f"noff:{category_idx}:{period_idx}")])
+    rows.append([InlineKeyboardButton(text=BACK_BUTTON, callback_data=f"ncat:{category_idx}")])
+    rows.append([InlineKeyboardButton(text="Назад к профилю", callback_data="nav:back_main")])
+    return InlineKeyboardMarkup(rows)
 
 
 def build_loyalty_keyboard() -> ReplyKeyboardMarkup:

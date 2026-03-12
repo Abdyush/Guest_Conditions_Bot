@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import logging
 from datetime import date, datetime, timedelta
 
 from sqlalchemy import BIGINT, INTEGER, NUMERIC, TEXT, TIMESTAMP, Column, MetaData, Table, create_engine, select, text
@@ -15,6 +16,7 @@ metadata = MetaData()
 desired_matches_run_table = Table(
     "desired_matches_run",
     metadata,
+    Column("snapshot_id", TEXT, nullable=True),
     Column("run_id", TEXT, nullable=False),
     Column("guest_id", TEXT, nullable=False),
     Column("availability_period", TEXT, nullable=False),
@@ -35,6 +37,16 @@ desired_matches_run_table = Table(
     Column("computed_at", TIMESTAMP, nullable=False),
 )
 
+active_snapshots_table = Table(
+    "active_snapshots",
+    metadata,
+    Column("dataset", TEXT, primary_key=True),
+    Column("snapshot_id", TEXT, nullable=False),
+)
+
+DATASET_KEY = "desired_matches_run"
+logger = logging.getLogger(__name__)
+
 
 class PostgresDesiredMatchesRunRepository(MatchesRunRepository):
     def __init__(self, database_url: str | None = None):
@@ -48,18 +60,41 @@ class PostgresDesiredMatchesRunRepository(MatchesRunRepository):
     def _init_schema(engine: Engine) -> None:
         metadata.create_all(engine)
         with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE desired_matches_run ADD COLUMN IF NOT EXISTS snapshot_id TEXT"))
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS active_snapshots(
+                        dataset TEXT PRIMARY KEY,
+                        snapshot_id TEXT NOT NULL
+                    )
+                    """
+                )
+            )
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_desired_matches_run_guest_period ON desired_matches_run(guest_id, period_label);"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_desired_matches_run_snapshot ON desired_matches_run(snapshot_id);"))
 
     def replace_run(self, run_id: str, rows: list[MatchedDateRecord]) -> None:
+        snapshot_id = run_id
+        logger.info("desired_matches_snapshot_start snapshot_id=%s rows=%s", snapshot_id, len(rows))
         with self._engine.begin() as conn:
-            conn.execute(text("TRUNCATE TABLE desired_matches_run"))
-            if not rows:
-                return
             grouped_rows = self._aggregate_rows(rows)
+            if grouped_rows:
+                conn.execute(
+                    desired_matches_run_table.insert(),
+                    [self._to_row(run_id, snapshot_id, row) for row in grouped_rows],
+                )
             conn.execute(
-                desired_matches_run_table.insert(),
-                [self._to_row(run_id, row) for row in grouped_rows],
+                text(
+                    """
+                    INSERT INTO active_snapshots(dataset, snapshot_id)
+                    VALUES (:dataset, :snapshot_id)
+                    ON CONFLICT (dataset) DO UPDATE SET snapshot_id = EXCLUDED.snapshot_id
+                    """
+                ),
+                {"dataset": DATASET_KEY, "snapshot_id": snapshot_id},
             )
+        logger.info("desired_matches_snapshot_published snapshot_id=%s", snapshot_id)
 
     def get_run_rows(self, run_id: str) -> list[MatchedDateRecord]:
         stmt = select(desired_matches_run_table).where(desired_matches_run_table.c.run_id == run_id)
@@ -94,6 +129,10 @@ class PostgresDesiredMatchesRunRepository(MatchesRunRepository):
         return out
 
     def get_latest_run_id(self) -> str | None:
+        with self._engine.connect() as conn:
+            active_snapshot_id = self._get_active_snapshot_id(conn)
+            if active_snapshot_id:
+                return active_snapshot_id
         stmt = select(desired_matches_run_table.c.run_id).order_by(desired_matches_run_table.c.computed_at.desc()).limit(1)
         with self._engine.connect() as conn:
             row = conn.execute(stmt).first()
@@ -102,13 +141,14 @@ class PostgresDesiredMatchesRunRepository(MatchesRunRepository):
             return str(row.run_id)
 
     @staticmethod
-    def _to_row(run_id: str, row: MatchedDateRecord) -> dict:
+    def _to_row(run_id: str, snapshot_id: str, row: MatchedDateRecord) -> dict:
         period_start = row.date
         period_end = row.period_end or row.date
         period_label = f"{period_start.isoformat()} - {period_end.isoformat()}"
         availability_end_inclusive = row.availability_end - timedelta(days=1)
         availability_period = f"{row.availability_start.isoformat()} - {availability_end_inclusive.isoformat()}"
         return {
+            "snapshot_id": snapshot_id,
             "run_id": run_id,
             "guest_id": row.guest_id,
             "availability_period": availability_period,
@@ -128,6 +168,15 @@ class PostgresDesiredMatchesRunRepository(MatchesRunRepository):
             "bank_percent": row.bank_percent,
             "computed_at": row.computed_at,
         }
+
+    @staticmethod
+    def _get_active_snapshot_id(conn) -> str | None:
+        row = conn.execute(
+            select(active_snapshots_table.c.snapshot_id).where(active_snapshots_table.c.dataset == DATASET_KEY)
+        ).first()
+        if row is None:
+            return None
+        return str(row.snapshot_id)
 
     @staticmethod
     def _group_key(row: MatchedDateRecord) -> tuple:
