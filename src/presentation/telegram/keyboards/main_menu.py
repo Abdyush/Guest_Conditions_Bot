@@ -15,7 +15,7 @@ BACK_BUTTON = BUTTONS["back"]
 MAIN_MENU_BUTTON = BUTTONS["main_menu"]
 SCENARIO_BACK_BUTTON = "Предыдущий шаг"
 CANCEL_BUTTON = BUTTONS["cancel"]
-SHARE_PHONE_BUTTON = BUTTONS["share_phone"]
+SHARE_PHONE_BUTTON = "Поделиться номером телефона"
 
 EDIT_ADULTS_BUTTON = BUTTONS["edit_adults"]
 EDIT_CHILDREN_BUTTON = BUTTONS["edit_children"]

@@ -49,6 +49,7 @@ from src.presentation.telegram.keyboards.main_menu import (
     build_quotes_group_inline_keyboard,
     build_scenario_menu_keyboard,
 )
+from src.presentation.telegram.presenters.registration_presenter import render_phone_reminder
 from src.presentation.telegram.services.pipeline_orchestrator import PipelineOrchestrator
 from src.presentation.telegram.services.use_cases_adapter import TelegramUseCasesAdapter
 from src.presentation.telegram.state.conversation_state import ConversationState
@@ -221,7 +222,7 @@ class TelegramBotHandlers:
             return
 
         if session.state == ConversationState.AWAIT_PHONE_CONTACT:
-            await message.reply_text(msg("phone_only"), reply_markup=build_phone_request_keyboard())
+            await message.reply_text(render_phone_reminder(), reply_markup=build_phone_request_keyboard())
             return
 
         if session.state in {
@@ -261,6 +262,19 @@ class TelegramBotHandlers:
 
     async def _handle_back(self, telegram_user_id: int, message) -> None:
         session = await self._deps.sessions.get(telegram_user_id)
+        if session.state in {
+            ConversationState.AWAIT_REG_ADULTS,
+            ConversationState.AWAIT_REG_CHILDREN_4_13,
+            ConversationState.AWAIT_REG_INFANTS_0_3,
+            ConversationState.AWAIT_REG_GROUPS,
+            ConversationState.AWAIT_REG_LOYALTY,
+            ConversationState.AWAIT_REG_BANK,
+            ConversationState.AWAIT_REG_DESIRED_PRICE,
+        }:
+            guest_id = self._deps.adapter.resolve_guest_id(telegram_user_id=telegram_user_id)
+            if await self._registration.handle_back(telegram_user_id, message, guest_id):
+                return
+
         guest_id = self._deps.adapter.resolve_guest_id(telegram_user_id=telegram_user_id)
         if not guest_id:
             session.state = ConversationState.AWAIT_PHONE_CONTACT

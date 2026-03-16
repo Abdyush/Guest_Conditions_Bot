@@ -9,6 +9,11 @@ from src.presentation.telegram.handlers.dependencies import TelegramHandlersDepe
 from src.presentation.telegram.handlers.shared.navigation import send_main_menu_for_guest
 from src.presentation.telegram.keyboards.main_menu import build_numeric_edit_keyboard, build_phone_request_keyboard
 from src.presentation.telegram.mappers.value_parser import telegram_profile_name
+from src.presentation.telegram.presenters.registration_presenter import (
+    render_adults_prompt,
+    render_registration_intro,
+    render_welcome_message,
+)
 from src.presentation.telegram.state.conversation_state import ConversationState
 from src.presentation.telegram.state.session_store import RegistrationDraft
 from src.presentation.telegram.ui_texts import msg
@@ -37,7 +42,7 @@ class OnboardingScenario:
             await self._deps.sessions.set_state(user.id, ConversationState.AWAIT_PHONE_CONTACT)
             session = await self._deps.sessions.get(user.id)
             session.registration = None
-            await message.reply_text(msg("ask_phone"), reply_markup=build_phone_request_keyboard())
+            await message.reply_text(render_welcome_message(), reply_markup=build_phone_request_keyboard())
         finally:
             await self._deps.sessions.persist(user.id)
 
@@ -79,5 +84,6 @@ class OnboardingScenario:
             allowed_groups=set(),
         )
         session.state = ConversationState.AWAIT_REG_ADULTS
-        await message.reply_text(msg("registration_start"), reply_markup=build_numeric_edit_keyboard())
+        await message.reply_text(render_registration_intro())
+        await message.reply_text(render_adults_prompt(), reply_markup=build_numeric_edit_keyboard())
         await self._deps.sessions.persist(user.id)
