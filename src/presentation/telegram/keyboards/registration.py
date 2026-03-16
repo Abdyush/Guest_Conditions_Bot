@@ -27,7 +27,7 @@ def build_registration_categories_inline_keyboard(*, selected_codes: set[str]) -
 def build_registration_loyalty_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text=REGISTRATION_LOYALTY_NO_STATUS_BUTTON)],
+            [KeyboardButton(text=REGISTRATION_LOYALTY_NO_STATUS_BUTTON), KeyboardButton(text=LOYALTY_OPTIONS[0])],
             [KeyboardButton(text=LOYALTY_OPTIONS[1]), KeyboardButton(text=LOYALTY_OPTIONS[2]), KeyboardButton(text=LOYALTY_OPTIONS[3])],
             [KeyboardButton(text=LOYALTY_OPTIONS[4]), KeyboardButton(text=LOYALTY_OPTIONS[5])],
             [KeyboardButton(text=BACK_BUTTON)],

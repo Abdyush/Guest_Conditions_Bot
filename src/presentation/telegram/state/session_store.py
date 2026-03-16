@@ -9,6 +9,7 @@ from aiogram.fsm.storage.base import StorageKey
 from aiogram.fsm.storage.redis import RedisStorage
 
 from src.application.dto.period_quote import PeriodQuote
+from src.presentation.telegram.state.active_flow import ActiveFlow
 from src.presentation.telegram.state.conversation_state import ConversationState
 from src.presentation.telegram.state.fsm_states import FSM_TO_STATE, STATE_TO_FSM
 
@@ -41,6 +42,7 @@ class PeriodQuotesDraft:
 @dataclass(slots=True)
 class UserSession:
     state: ConversationState = ConversationState.IDLE
+    active_flow: ActiveFlow | None = None
     registration: RegistrationDraft | None = None
     period_quotes: PeriodQuotesDraft | None = None
     available_category_names: list[str] | None = None
@@ -68,6 +70,7 @@ class InMemorySessionStore:
 
         session = UserSession(
             state=self._to_conversation_state(state_raw),
+            active_flow=self._deserialize_active_flow(data.get("active_flow")),
             registration=self._deserialize_registration(data.get("registration")),
             period_quotes=self._deserialize_period_quotes(data.get("period_quotes")),
             available_category_names=self._deserialize_available_category_names(data.get("available_category_names")),
@@ -96,6 +99,7 @@ class InMemorySessionStore:
         await fsm.set_state(fsm_state)
         await fsm.set_data(
             {
+                "active_flow": self._serialize_active_flow(session.active_flow),
                 "registration": self._serialize_registration(session.registration),
                 "period_quotes": self._serialize_period_quotes(session.period_quotes),
                 "available_category_names": self._serialize_available_category_names(session.available_category_names),
@@ -198,6 +202,21 @@ class InMemorySessionStore:
         if value is None:
             return None
         return list(value)
+
+    @staticmethod
+    def _serialize_active_flow(value: ActiveFlow | None) -> str | None:
+        if value is None:
+            return None
+        return value.value
+
+    @staticmethod
+    def _deserialize_active_flow(value: str | None) -> ActiveFlow | None:
+        if value is None:
+            return None
+        try:
+            return ActiveFlow(value)
+        except ValueError:
+            return None
 
     @staticmethod
     def _deserialize_available_category_names(value) -> list[str] | None:

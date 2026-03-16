@@ -334,6 +334,21 @@ class TelegramUseCasesAdapter:
         names = sorted({r.category_name for r in rows if r.guest_id == guest_id})
         return names
 
+    def get_available_categories_with_groups(self, *, guest_id: str) -> list[tuple[str, str]]:
+        run_id = self._desired_matches_run_repo.get_latest_run_id()
+        if not run_id:
+            return []
+        rows = self._desired_matches_run_repo.get_run_rows(run_id)
+        pairs = sorted(
+            {
+                (r.category_name, r.group_id)
+                for r in rows
+                if r.guest_id == guest_id and r.category_name and r.group_id
+            },
+            key=lambda x: (x[1], x[0]),
+        )
+        return pairs
+
     def get_category_matches(self, *, guest_id: str, category_name: str) -> tuple[str, list[MatchedDateRecord]]:
         run_id = self._desired_matches_run_repo.get_latest_run_id()
         if not run_id:

@@ -15,6 +15,7 @@ from src.presentation.telegram.callbacks.data_parser import (
     NAV_BACK_QUOTES_GROUP,
     NAV_MAIN,
     PREFIX_AVAILABLE_CATEGORY,
+    PREFIX_AVAILABLE_OFFER,
     PREFIX_AVAILABLE_PERIOD,
     PREFIX_BEST_GROUP,
     PREFIX_CALENDAR,
@@ -33,6 +34,7 @@ from src.presentation.telegram.handlers.scenarios.onboarding import OnboardingSc
 from src.presentation.telegram.handlers.scenarios.period_quotes import PeriodQuotesScenario
 from src.presentation.telegram.handlers.scenarios.registration import RegistrationScenario
 from src.presentation.telegram.handlers.shared.navigation import send_main_menu_for_guest
+from src.presentation.telegram.navigation.flow_guard import TelegramFlowGuard
 from src.presentation.telegram.keyboards.main_menu import (
     AVAILABLE_ROOMS_BUTTON,
     BACK_BUTTON,
@@ -52,6 +54,7 @@ from src.presentation.telegram.keyboards.main_menu import (
 from src.presentation.telegram.presenters.registration_presenter import render_phone_reminder
 from src.presentation.telegram.services.pipeline_orchestrator import PipelineOrchestrator
 from src.presentation.telegram.services.use_cases_adapter import TelegramUseCasesAdapter
+from src.presentation.telegram.state.active_flow import ActiveFlow
 from src.presentation.telegram.state.conversation_state import ConversationState
 from src.presentation.telegram.state.session_store import InMemorySessionStore
 from src.presentation.telegram.ui_texts import msg
@@ -69,7 +72,8 @@ MAIN_MENU_ACTION_BUTTONS = {
 
 class TelegramBotHandlers:
     def __init__(self, *, adapter: TelegramUseCasesAdapter, sessions: InMemorySessionStore, pipeline: PipelineOrchestrator):
-        deps = TelegramHandlersDependencies(adapter=adapter, sessions=sessions, pipeline=pipeline)
+        flow_guard = TelegramFlowGuard(sessions=sessions)
+        deps = TelegramHandlersDependencies(adapter=adapter, sessions=sessions, pipeline=pipeline, flow_guard=flow_guard)
         self._deps = deps
         self._onboarding = OnboardingScenario(deps=deps)
         self._registration = RegistrationScenario(deps=deps)
@@ -100,6 +104,7 @@ class TelegramBotHandlers:
             return
         data = query.data or ""
         logger.info("telegram_update type=callback user_id=%s data=%s", user.id, data)
+        active_flow = await self._deps.flow_guard.get_active_flow(user.id)
 
         if data == NAV_MAIN:
             await query.answer()
@@ -111,6 +116,8 @@ class TelegramBotHandlers:
         if data == NAV_BACK_MAIN:
             await query.answer()
             guest_id = self._deps.adapter.resolve_guest_id(telegram_user_id=user.id)
+            if active_flow is not None:
+                await self._deps.sessions.reset(user.id)
             if guest_id and query.message is not None:
                 await send_main_menu_for_guest(deps=self._deps, message=query.message, guest_id=guest_id)
             return
@@ -121,6 +128,9 @@ class TelegramBotHandlers:
             await self._best_periods.handle_nav_back_groups(user.id, query)
             return
         if data == NAV_BACK_AVAILABLE_CATEGORIES:
+            if active_flow != ActiveFlow.AVAILABLE_ROOMS:
+                await query.answer()
+                return
             await self._available_offers.handle_nav_back_available_categories(user.id, query)
             return
         if data == NAV_BACK_NOTIFIED_CATEGORIES:
@@ -131,6 +141,10 @@ class TelegramBotHandlers:
             return
         if data == NAV_BACK_QUOTES_CATEGORIES:
             await self._period_quotes.handle_nav_back_categories(user.id, query)
+            return
+
+        if active_flow == ActiveFlow.AVAILABLE_ROOMS and not self._is_available_flow_callback(data):
+            await query.answer()
             return
 
         if data.startswith(PREFIX_BEST_GROUP):
@@ -146,10 +160,22 @@ class TelegramBotHandlers:
             await self._period_quotes.handle_quotes_category_callback(user.id, query, data)
             return
         if data.startswith(PREFIX_AVAILABLE_CATEGORY):
+            if active_flow != ActiveFlow.AVAILABLE_ROOMS:
+                await query.answer()
+                return
             await self._available_offers.handle_available_category_callback(user.id, query, data)
             return
         if data.startswith(PREFIX_AVAILABLE_PERIOD):
+            if active_flow != ActiveFlow.AVAILABLE_ROOMS:
+                await query.answer()
+                return
             await self._available_offers.handle_available_period_callback(user.id, query, data)
+            return
+        if data.startswith(PREFIX_AVAILABLE_OFFER):
+            if active_flow != ActiveFlow.AVAILABLE_ROOMS:
+                await query.answer()
+                return
+            await self._available_offers.handle_available_offer_callback(user.id, query, data)
             return
         if data.startswith(PREFIX_REGISTRATION_CATEGORY):
             await self._registration.handle_categories_callback(user.id, query, data)
@@ -194,6 +220,9 @@ class TelegramBotHandlers:
             await self._handle_back(user.id, message)
             return
 
+        if await self._available_offers.handle_flow_text(user.id, text, message):
+            return
+
         if session.state != ConversationState.IDLE and text in MAIN_MENU_ACTION_BUTTONS:
             return
 
@@ -203,7 +232,6 @@ class TelegramBotHandlers:
             return
 
         if text == AVAILABLE_ROOMS_BUTTON:
-            await message.reply_text(msg("menu_hint"), reply_markup=build_scenario_menu_keyboard())
             await self._available_offers.open_available_categories(user.id, message)
             return
 
@@ -290,3 +318,13 @@ class TelegramBotHandlers:
 
         await self._deps.sessions.reset(telegram_user_id)
         await send_main_menu_for_guest(deps=self._deps, message=message, guest_id=guest_id)
+
+    @staticmethod
+    def _is_available_flow_callback(data: str) -> bool:
+        return data == NAV_BACK_AVAILABLE_CATEGORIES or data.startswith(
+            (
+                PREFIX_AVAILABLE_CATEGORY,
+                PREFIX_AVAILABLE_PERIOD,
+                PREFIX_AVAILABLE_OFFER,
+            )
+        )
