@@ -26,6 +26,10 @@ def render_registration_intro() -> str:
     )
 
 
+def render_registration_flow_hint() -> str:
+    return "Сейчас идет регистрация. Используйте кнопки текущего шага, кнопку «Назад» или «Главное меню»."
+
+
 def render_adults_prompt() -> str:
     return (
         "Сколько взрослых будет проживать?\n"

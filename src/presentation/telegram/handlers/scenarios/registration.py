@@ -6,7 +6,10 @@ from decimal import Decimal
 from src.presentation.telegram.handlers.dependencies import TelegramHandlersDependencies
 from src.presentation.telegram.handlers.shared.navigation import send_main_menu_for_guest
 from src.presentation.telegram.keyboards.main_menu import (
+    AVAILABLE_ROOMS_BUTTON,
+    BEST_PERIOD_BUTTON,
     EDIT_ADULTS_BUTTON,
+    EDIT_DATA_BUTTON,
     EDIT_BANK_BUTTON,
     EDIT_CHILDREN_BUTTON,
     EDIT_GROUPS_BUTTON,
@@ -18,12 +21,16 @@ from src.presentation.telegram.keyboards.main_menu import (
     build_edit_menu_keyboard,
     build_loyalty_keyboard,
     build_numeric_edit_keyboard,
+    PERIOD_QUOTES_BUTTON,
     build_phone_request_keyboard,
 )
 from src.presentation.telegram.keyboards.registration import (
     REGISTRATION_LOYALTY_NO_STATUS_BUTTON,
+    build_registration_bank_keyboard,
     build_registration_categories_inline_keyboard,
+    build_registration_navigation_keyboard,
     build_registration_loyalty_keyboard,
+    build_registration_numeric_keyboard,
 )
 from src.presentation.telegram.mappers.value_parser import parse_decimal, parse_int
 from src.presentation.telegram.presenters.registration_presenter import (
@@ -43,8 +50,10 @@ from src.presentation.telegram.presenters.registration_presenter import (
     render_price_invalid,
     render_price_prompt,
     render_registration_done,
+    render_registration_flow_hint,
     render_select_at_least_one,
 )
+from src.presentation.telegram.state.active_flow import ActiveFlow
 from src.presentation.telegram.state.conversation_state import ConversationState
 from src.presentation.telegram.state.session_store import RegistrationDraft
 from src.presentation.telegram.ui_texts import BANK_LABEL_TO_CODE, CATEGORY_LABEL_TO_CODE, LOYALTY_OPTIONS, msg
@@ -57,10 +66,31 @@ class RegistrationScenario:
     def __init__(self, *, deps: TelegramHandlersDependencies):
         self._deps = deps
 
+    async def is_active(self, telegram_user_id: int) -> bool:
+        return await self._deps.flow_guard.is_active(telegram_user_id, ActiveFlow.REGISTRATION)
+
+    async def handle_flow_text(self, telegram_user_id: int, text: str, message) -> bool:
+        if not await self.is_active(telegram_user_id):
+            return False
+        if text not in {
+            EDIT_DATA_BUTTON,
+            AVAILABLE_ROOMS_BUTTON,
+            PERIOD_QUOTES_BUTTON,
+            BEST_PERIOD_BUTTON,
+        }:
+            return False
+        session = await self._deps.sessions.get(telegram_user_id)
+        await message.reply_text(
+            render_registration_flow_hint(),
+            reply_markup=self._reply_markup_for_state(session.state),
+        )
+        return True
+
     async def handle_registration_step(self, telegram_user_id: int, text: str, message) -> None:
         session = await self._deps.sessions.get(telegram_user_id)
         reg = session.registration
         if reg is None:
+            await self._deps.flow_guard.leave(telegram_user_id)
             session.state = ConversationState.AWAIT_PHONE_CONTACT
             await message.reply_text(render_phone_reminder(), reply_markup=build_phone_request_keyboard())
             return
@@ -68,27 +98,27 @@ class RegistrationScenario:
         if session.state == ConversationState.AWAIT_REG_ADULTS:
             adults = parse_int(text)
             if adults is None or adults < 1:
-                await message.reply_text(render_adults_invalid(), reply_markup=build_numeric_edit_keyboard())
+                await message.reply_text(render_adults_invalid(), reply_markup=build_registration_numeric_keyboard())
                 return
             reg.adults = adults
             session.state = ConversationState.AWAIT_REG_CHILDREN_4_13
-            await message.reply_text(render_children_prompt(), reply_markup=build_numeric_edit_keyboard())
+            await message.reply_text(render_children_prompt(), reply_markup=build_registration_numeric_keyboard())
             return
 
         if session.state == ConversationState.AWAIT_REG_CHILDREN_4_13:
             children = parse_int(text)
             if children is None or children < 0:
-                await message.reply_text(render_children_invalid(), reply_markup=build_numeric_edit_keyboard())
+                await message.reply_text(render_children_invalid(), reply_markup=build_registration_numeric_keyboard())
                 return
             reg.children_4_13 = children
             session.state = ConversationState.AWAIT_REG_INFANTS_0_3
-            await message.reply_text(render_infants_prompt(), reply_markup=build_numeric_edit_keyboard())
+            await message.reply_text(render_infants_prompt(), reply_markup=build_registration_numeric_keyboard())
             return
 
         if session.state == ConversationState.AWAIT_REG_INFANTS_0_3:
             infants = parse_int(text)
             if infants is None or infants < 0:
-                await message.reply_text(render_infants_invalid(), reply_markup=build_numeric_edit_keyboard())
+                await message.reply_text(render_infants_invalid(), reply_markup=build_registration_numeric_keyboard())
                 return
             reg.infants_0_3 = infants
             session.state = ConversationState.AWAIT_REG_GROUPS
@@ -109,22 +139,22 @@ class RegistrationScenario:
                 return
             reg.loyalty_status = normalized
             session.state = ConversationState.AWAIT_REG_BANK
-            await message.reply_text(render_bank_prompt(), reply_markup=build_bank_keyboard())
+            await message.reply_text(render_bank_prompt(), reply_markup=build_registration_bank_keyboard())
             return
 
         if session.state == ConversationState.AWAIT_REG_BANK:
             if text not in BANK_LABEL_TO_CODE:
-                await message.reply_text(render_bank_invalid(), reply_markup=build_bank_keyboard())
+                await message.reply_text(render_bank_invalid(), reply_markup=build_registration_bank_keyboard())
                 return
             reg.bank_status = BANK_LABEL_TO_CODE[text] or None
             session.state = ConversationState.AWAIT_REG_DESIRED_PRICE
-            await message.reply_text(render_price_prompt(), reply_markup=build_numeric_edit_keyboard())
+            await message.reply_text(render_price_prompt(), reply_markup=build_registration_numeric_keyboard())
             return
 
         if session.state == ConversationState.AWAIT_REG_DESIRED_PRICE:
             desired_price = parse_decimal(text)
             if desired_price is None or desired_price <= 0:
-                await message.reply_text(render_price_invalid(), reply_markup=build_numeric_edit_keyboard())
+                await message.reply_text(render_price_invalid(), reply_markup=build_registration_numeric_keyboard())
                 return
             reg.desired_price_rub = desired_price
             await self._finish_registration(telegram_user_id, reg, message)
@@ -289,15 +319,15 @@ class RegistrationScenario:
         session = await self._deps.sessions.get(telegram_user_id)
         if session.state == ConversationState.AWAIT_REG_CHILDREN_4_13:
             session.state = ConversationState.AWAIT_REG_ADULTS
-            await message.reply_text(render_adults_prompt(), reply_markup=build_numeric_edit_keyboard())
+            await message.reply_text(render_adults_prompt(), reply_markup=build_registration_numeric_keyboard())
             return True
         if session.state == ConversationState.AWAIT_REG_INFANTS_0_3:
             session.state = ConversationState.AWAIT_REG_CHILDREN_4_13
-            await message.reply_text(render_children_prompt(), reply_markup=build_numeric_edit_keyboard())
+            await message.reply_text(render_children_prompt(), reply_markup=build_registration_numeric_keyboard())
             return True
         if session.state == ConversationState.AWAIT_REG_GROUPS:
             session.state = ConversationState.AWAIT_REG_INFANTS_0_3
-            await message.reply_text(render_infants_prompt(), reply_markup=build_numeric_edit_keyboard())
+            await message.reply_text(render_infants_prompt(), reply_markup=build_registration_numeric_keyboard())
             return True
         if session.state == ConversationState.AWAIT_REG_LOYALTY:
             session.state = ConversationState.AWAIT_REG_GROUPS
@@ -314,9 +344,10 @@ class RegistrationScenario:
             return True
         if session.state == ConversationState.AWAIT_REG_DESIRED_PRICE:
             session.state = ConversationState.AWAIT_REG_BANK
-            await message.reply_text(render_bank_prompt(), reply_markup=build_bank_keyboard())
+            await message.reply_text(render_bank_prompt(), reply_markup=build_registration_bank_keyboard())
             return True
         if session.state == ConversationState.AWAIT_REG_ADULTS:
+            await self._deps.flow_guard.leave(telegram_user_id)
             session.state = ConversationState.AWAIT_PHONE_CONTACT
             session.registration = None
             await message.reply_text(render_phone_reminder(), reply_markup=build_phone_request_keyboard())
@@ -364,6 +395,23 @@ class RegistrationScenario:
         await self._deps.sessions.reset(telegram_user_id)
         await message.reply_text(render_registration_done())
         await send_main_menu_for_guest(deps=self._deps, message=message, guest_id=guest_id)
+
+    @staticmethod
+    def _reply_markup_for_state(state: ConversationState):
+        if state in {
+            ConversationState.AWAIT_REG_ADULTS,
+            ConversationState.AWAIT_REG_CHILDREN_4_13,
+            ConversationState.AWAIT_REG_INFANTS_0_3,
+            ConversationState.AWAIT_REG_DESIRED_PRICE,
+        }:
+            return build_registration_numeric_keyboard()
+        if state == ConversationState.AWAIT_REG_LOYALTY:
+            return build_registration_loyalty_keyboard()
+        if state == ConversationState.AWAIT_REG_BANK:
+            return build_registration_bank_keyboard()
+        if state == ConversationState.AWAIT_REG_GROUPS:
+            return build_registration_navigation_keyboard()
+        return build_registration_navigation_keyboard()
 
 
 def _normalize_loyalty_selection(value: str) -> str:

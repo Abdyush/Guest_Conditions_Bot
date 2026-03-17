@@ -7,6 +7,7 @@ from telegram.ext import ContextTypes
 
 from src.presentation.telegram.callbacks.data_parser import (
     NAV_BACK_AVAILABLE_CATEGORIES,
+    NAV_BACK_BEST_CATEGORIES,
     NAV_BACK_BEST_GROUPS,
     NAV_BACK_MAIN,
     NAV_BACK_NOTIFIED_CATEGORIES,
@@ -18,12 +19,17 @@ from src.presentation.telegram.callbacks.data_parser import (
     PREFIX_AVAILABLE_OFFER,
     PREFIX_AVAILABLE_PERIOD,
     PREFIX_BEST_GROUP,
+    PREFIX_BEST_CATEGORY,
+    PREFIX_BEST_OFFER,
+    PREFIX_BEST_RESULT,
     PREFIX_CALENDAR,
     PREFIX_NOTIFIED_CATEGORY,
     PREFIX_NOTIFIED_OFFER,
     PREFIX_NOTIFIED_PERIOD,
     PREFIX_QUOTES_CATEGORY,
+    PREFIX_QUOTES_OFFER,
     PREFIX_QUOTES_GROUP,
+    PREFIX_QUOTES_RESULT,
     PREFIX_REGISTRATION_CATEGORY,
 )
 from src.presentation.telegram.handlers.dependencies import TelegramHandlersDependencies
@@ -44,11 +50,9 @@ from src.presentation.telegram.keyboards.main_menu import (
     MAIN_MENU_BUTTON,
     PERIOD_QUOTES_BUTTON,
     SCENARIO_BACK_BUTTON,
-    build_best_group_inline_keyboard,
     build_edit_menu_keyboard,
     build_main_menu_keyboard,
     build_phone_request_keyboard,
-    build_quotes_group_inline_keyboard,
     build_scenario_menu_keyboard,
 )
 from src.presentation.telegram.presenters.registration_presenter import render_phone_reminder
@@ -104,7 +108,8 @@ class TelegramBotHandlers:
             return
         data = query.data or ""
         logger.info("telegram_update type=callback user_id=%s data=%s", user.id, data)
-        active_flow = await self._deps.flow_guard.get_active_flow(user.id)
+        session = await self._deps.sessions.get(user.id)
+        active_flow = session.active_flow
 
         if data == NAV_MAIN:
             await query.answer()
@@ -127,6 +132,9 @@ class TelegramBotHandlers:
         if data == NAV_BACK_BEST_GROUPS:
             await self._best_periods.handle_nav_back_groups(user.id, query)
             return
+        if data == NAV_BACK_BEST_CATEGORIES:
+            await self._best_periods.handle_nav_back_categories(user.id, query)
+            return
         if data == NAV_BACK_AVAILABLE_CATEGORIES:
             if active_flow != ActiveFlow.AVAILABLE_ROOMS:
                 await query.answer()
@@ -143,12 +151,30 @@ class TelegramBotHandlers:
             await self._period_quotes.handle_nav_back_categories(user.id, query)
             return
 
+        if active_flow == ActiveFlow.REGISTRATION and not self._is_registration_flow_callback(data):
+            await query.answer()
+            return
         if active_flow == ActiveFlow.AVAILABLE_ROOMS and not self._is_available_flow_callback(data):
+            await query.answer()
+            return
+        if active_flow == ActiveFlow.BEST_PERIODS and not self._is_best_periods_flow_callback(data):
+            await query.answer()
+            return
+        if active_flow == ActiveFlow.PERIOD_QUOTES and not self._is_period_quotes_flow_callback(data):
             await query.answer()
             return
 
         if data.startswith(PREFIX_BEST_GROUP):
             await self._best_periods.handle_best_group_callback(user.id, query, data)
+            return
+        if data.startswith(PREFIX_BEST_CATEGORY):
+            await self._best_periods.handle_best_category_callback(user.id, query, data)
+            return
+        if data.startswith(PREFIX_BEST_OFFER):
+            await self._best_periods.handle_best_offer_callback(user.id, query, data)
+            return
+        if data.startswith(PREFIX_BEST_RESULT):
+            await self._best_periods.handle_best_result_callback(user.id, query, data)
             return
         if data.startswith(PREFIX_QUOTES_GROUP):
             await self._period_quotes.handle_quotes_group_callback(user.id, query, data)
@@ -158,6 +184,12 @@ class TelegramBotHandlers:
             return
         if data.startswith(PREFIX_QUOTES_CATEGORY):
             await self._period_quotes.handle_quotes_category_callback(user.id, query, data)
+            return
+        if data.startswith(PREFIX_QUOTES_OFFER):
+            await self._period_quotes.handle_quotes_offer_callback(user.id, query, data)
+            return
+        if data.startswith(PREFIX_QUOTES_RESULT):
+            await self._period_quotes.handle_quotes_result_callback(user.id, query, data)
             return
         if data.startswith(PREFIX_AVAILABLE_CATEGORY):
             if active_flow != ActiveFlow.AVAILABLE_ROOMS:
@@ -178,6 +210,9 @@ class TelegramBotHandlers:
             await self._available_offers.handle_available_offer_callback(user.id, query, data)
             return
         if data.startswith(PREFIX_REGISTRATION_CATEGORY):
+            if active_flow != ActiveFlow.REGISTRATION and session.state != ConversationState.EDIT_GROUPS:
+                await query.answer()
+                return
             await self._registration.handle_categories_callback(user.id, query, data)
             return
         if data.startswith(PREFIX_NOTIFIED_CATEGORY):
@@ -220,7 +255,13 @@ class TelegramBotHandlers:
             await self._handle_back(user.id, message)
             return
 
+        if await self._registration.handle_flow_text(user.id, text, message):
+            return
         if await self._available_offers.handle_flow_text(user.id, text, message):
+            return
+        if await self._best_periods.handle_flow_text(user.id, text, message):
+            return
+        if await self._period_quotes.handle_flow_text(user.id, text, message):
             return
 
         if session.state != ConversationState.IDLE and text in MAIN_MENU_ACTION_BUTTONS:
@@ -236,17 +277,11 @@ class TelegramBotHandlers:
             return
 
         if text == BEST_PERIOD_BUTTON:
-            await self._deps.sessions.set_state(user.id, ConversationState.AWAIT_BEST_GROUP_ID)
-            await message.reply_text(msg("menu_hint"), reply_markup=build_scenario_menu_keyboard())
-            await message.reply_text(msg("ask_best_group"), reply_markup=build_best_group_inline_keyboard())
+            await self._best_periods.open_group_picker(telegram_user_id=user.id, message=message)
             return
 
         if text == PERIOD_QUOTES_BUTTON:
-            await self._deps.sessions.set_state(user.id, ConversationState.AWAIT_QUOTES_GROUP)
-            session_for_quotes = await self._deps.sessions.get(user.id)
-            session_for_quotes.period_quotes = None
-            await message.reply_text(msg("menu_hint"), reply_markup=build_scenario_menu_keyboard())
-            await message.reply_text(msg("ask_quotes_group"), reply_markup=build_quotes_group_inline_keyboard())
+            await self._period_quotes.open_group_picker(telegram_user_id=user.id, message=message)
             return
 
         if session.state == ConversationState.AWAIT_PHONE_CONTACT:
@@ -326,5 +361,39 @@ class TelegramBotHandlers:
                 PREFIX_AVAILABLE_CATEGORY,
                 PREFIX_AVAILABLE_PERIOD,
                 PREFIX_AVAILABLE_OFFER,
+            )
+        )
+
+    @staticmethod
+    def _is_registration_flow_callback(data: str) -> bool:
+        return data.startswith(PREFIX_REGISTRATION_CATEGORY)
+
+    @staticmethod
+    def _is_period_quotes_flow_callback(data: str) -> bool:
+        return data in {
+            NAV_BACK_QUOTES_GROUP,
+            NAV_BACK_QUOTES_CALENDAR,
+            NAV_BACK_QUOTES_CATEGORIES,
+        } or data.startswith(
+            (
+                PREFIX_QUOTES_GROUP,
+                PREFIX_CALENDAR,
+                PREFIX_QUOTES_CATEGORY,
+                PREFIX_QUOTES_OFFER,
+                PREFIX_QUOTES_RESULT,
+            )
+        )
+
+    @staticmethod
+    def _is_best_periods_flow_callback(data: str) -> bool:
+        return data in {
+            NAV_BACK_BEST_GROUPS,
+            NAV_BACK_BEST_CATEGORIES,
+        } or data.startswith(
+            (
+                PREFIX_BEST_GROUP,
+                PREFIX_BEST_CATEGORY,
+                PREFIX_BEST_OFFER,
+                PREFIX_BEST_RESULT,
             )
         )

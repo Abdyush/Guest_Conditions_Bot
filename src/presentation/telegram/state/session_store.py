@@ -40,10 +40,17 @@ class PeriodQuotesDraft:
 
 
 @dataclass(slots=True)
+class BestPeriodDraft:
+    group_id: str | None = None
+    category_names: list[str] | None = None
+
+
+@dataclass(slots=True)
 class UserSession:
     state: ConversationState = ConversationState.IDLE
     active_flow: ActiveFlow | None = None
     registration: RegistrationDraft | None = None
+    best_period: BestPeriodDraft | None = None
     period_quotes: PeriodQuotesDraft | None = None
     available_category_names: list[str] | None = None
     available_category_rows: list | None = None
@@ -72,6 +79,7 @@ class InMemorySessionStore:
             state=self._to_conversation_state(state_raw),
             active_flow=self._deserialize_active_flow(data.get("active_flow")),
             registration=self._deserialize_registration(data.get("registration")),
+            best_period=self._deserialize_best_period(data.get("best_period")),
             period_quotes=self._deserialize_period_quotes(data.get("period_quotes")),
             available_category_names=self._deserialize_available_category_names(data.get("available_category_names")),
             available_category_rows=None,
@@ -101,6 +109,7 @@ class InMemorySessionStore:
             {
                 "active_flow": self._serialize_active_flow(session.active_flow),
                 "registration": self._serialize_registration(session.registration),
+                "best_period": self._serialize_best_period(session.best_period),
                 "period_quotes": self._serialize_period_quotes(session.period_quotes),
                 "available_category_names": self._serialize_available_category_names(session.available_category_names),
             },
@@ -175,6 +184,24 @@ class InMemorySessionStore:
             if draft.last_room_dates_by_category is not None
             else None,
         }
+
+    @staticmethod
+    def _serialize_best_period(draft: BestPeriodDraft | None) -> dict | None:
+        if draft is None:
+            return None
+        return {
+            "group_id": draft.group_id,
+            "category_names": list(draft.category_names) if draft.category_names is not None else None,
+        }
+
+    @staticmethod
+    def _deserialize_best_period(payload) -> BestPeriodDraft | None:
+        if not payload:
+            return None
+        return BestPeriodDraft(
+            group_id=payload.get("group_id"),
+            category_names=list(payload["category_names"]) if payload.get("category_names") is not None else None,
+        )
 
     @staticmethod
     def _deserialize_period_quotes(payload) -> PeriodQuotesDraft | None:

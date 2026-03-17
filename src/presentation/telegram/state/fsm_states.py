@@ -26,6 +26,7 @@ class ConversationFSM(StatesGroup):
     edit_bank = State()
     edit_desired_price = State()
     await_best_group_id = State()
+    await_best_category_id = State()
     await_quotes_group = State()
     await_quotes_calendar = State()
     await_quotes_category = State()
@@ -52,6 +53,7 @@ STATE_TO_FSM: dict[ConversationState, State] = {
     ConversationState.EDIT_BANK: ConversationFSM.edit_bank,
     ConversationState.EDIT_DESIRED_PRICE: ConversationFSM.edit_desired_price,
     ConversationState.AWAIT_BEST_GROUP_ID: ConversationFSM.await_best_group_id,
+    ConversationState.AWAIT_BEST_CATEGORY_ID: ConversationFSM.await_best_category_id,
     ConversationState.AWAIT_QUOTES_GROUP: ConversationFSM.await_quotes_group,
     ConversationState.AWAIT_QUOTES_CALENDAR: ConversationFSM.await_quotes_calendar,
     ConversationState.AWAIT_QUOTES_CATEGORY: ConversationFSM.await_quotes_category,

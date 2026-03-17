@@ -7,13 +7,15 @@ from telegram.ext import ContextTypes
 
 from src.presentation.telegram.handlers.dependencies import TelegramHandlersDependencies
 from src.presentation.telegram.handlers.shared.navigation import send_main_menu_for_guest
-from src.presentation.telegram.keyboards.main_menu import build_numeric_edit_keyboard, build_phone_request_keyboard
+from src.presentation.telegram.keyboards.main_menu import build_phone_request_keyboard
+from src.presentation.telegram.keyboards.registration import build_registration_numeric_keyboard
 from src.presentation.telegram.mappers.value_parser import telegram_profile_name
 from src.presentation.telegram.presenters.registration_presenter import (
     render_adults_prompt,
     render_registration_intro,
     render_welcome_message,
 )
+from src.presentation.telegram.state.active_flow import ActiveFlow
 from src.presentation.telegram.state.conversation_state import ConversationState
 from src.presentation.telegram.state.session_store import RegistrationDraft
 from src.presentation.telegram.ui_texts import msg
@@ -83,7 +85,8 @@ class OnboardingScenario:
             name=telegram_profile_name(user),
             allowed_groups=set(),
         )
+        await self._deps.flow_guard.enter(user.id, ActiveFlow.REGISTRATION)
         session.state = ConversationState.AWAIT_REG_ADULTS
         await message.reply_text(render_registration_intro())
-        await message.reply_text(render_adults_prompt(), reply_markup=build_numeric_edit_keyboard())
+        await message.reply_text(render_adults_prompt(), reply_markup=build_registration_numeric_keyboard())
         await self._deps.sessions.persist(user.id)

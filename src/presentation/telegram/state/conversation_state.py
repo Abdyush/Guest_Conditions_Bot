@@ -24,6 +24,7 @@ class ConversationState(str, Enum):
     EDIT_BANK = "edit_bank"
     EDIT_DESIRED_PRICE = "edit_desired_price"
     AWAIT_BEST_GROUP_ID = "await_best_group_id"
+    AWAIT_BEST_CATEGORY_ID = "await_best_category_id"
     AWAIT_QUOTES_GROUP = "await_quotes_group"
     AWAIT_QUOTES_CALENDAR = "await_quotes_calendar"
     AWAIT_QUOTES_CATEGORY = "await_quotes_category"

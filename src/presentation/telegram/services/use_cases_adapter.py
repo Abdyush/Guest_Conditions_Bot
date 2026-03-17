@@ -258,6 +258,32 @@ class TelegramUseCasesAdapter:
         _, picks = self._best_periods_uc.execute(query)
         return picks
 
+    def get_best_period_categories(self, *, guest_id: str, group_id: str, top_k: int = 200) -> list[str]:
+        picks = self.get_best_periods(guest_id=guest_id, group_id=group_id, top_k=top_k)
+        return sorted({pick.category_name for pick in picks})
+
+    def get_best_period_details_for_category(
+        self,
+        *,
+        guest_id: str,
+        group_id: str,
+        category_name: str,
+        top_k: int = 200,
+    ) -> tuple[PeriodPickDTO | None, list[PeriodQuote]]:
+        picks = self.get_best_periods(guest_id=guest_id, group_id=group_id, top_k=top_k)
+        selected_pick = next((pick for pick in picks if pick.category_name == category_name), None)
+        if selected_pick is None:
+            return None, []
+
+        _, quotes = self.get_period_quotes(
+            guest_id=guest_id,
+            period_start=selected_pick.start_date,
+            period_end=selected_pick.end_date_inclusive,
+            group_ids={group_id.strip().upper()},
+        )
+        filtered_quotes = [quote for quote in quotes if quote.category_name == category_name]
+        return selected_pick, filtered_quotes
+
     def get_period_quotes(
         self,
         *,
