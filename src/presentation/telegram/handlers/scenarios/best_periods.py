@@ -81,7 +81,7 @@ class BestPeriodsScenario:
 
         group_id = data.split(":", 1)[1].strip().upper()
         try:
-            category_names = self._deps.adapter.get_best_period_categories(guest_id=guest_id, group_id=group_id)
+            category_names = self._deps.adapter.get_group_categories_for_guest(guest_id=guest_id, group_id=group_id)
         except Exception:
             logger.exception("best_period_failed user_id=%s guest_id=%s", telegram_user_id, guest_id)
             await query.answer()

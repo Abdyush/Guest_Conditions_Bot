@@ -13,12 +13,15 @@ from src.application.dto.matched_date_record import MatchedDateRecord
 from src.application.dto.period_pick import PeriodPickDTO
 from src.application.dto.period_quote import PeriodQuote
 from src.application.use_cases.calculate_matches_for_all_guests import CalculateMatchesForAllGuests
+from src.application.use_cases.find_best_period_for_category import find_best_period_for_category
+from src.application.use_cases.find_group_categories_for_guest import find_group_categories_for_guest
 from src.application.use_cases.get_best_periods_for_guest_in_group import GetBestPeriodsForGuestInGroup
 from src.application.use_cases.get_period_quotes_from_matches_run import GetPeriodQuotesFromMatchesRun
 from src.domain.entities.guest_preferences import GuestPreferences
 from src.domain.services.category_capacity import Occupancy
 from src.domain.services.date_price_selector import DatePriceSelector
 from src.domain.services.period_builder import PeriodBuilder
+from src.domain.services.pricing_service import PricingContext
 from src.domain.services.pricing_service import PricingService
 from src.domain.value_objects.bank import BankStatus
 from src.domain.value_objects.loyalty import LoyaltyPolicy, LoyaltyStatus
@@ -262,16 +265,56 @@ class TelegramUseCasesAdapter:
         picks = self.get_best_periods(guest_id=guest_id, group_id=group_id, top_k=top_k)
         return sorted({pick.category_name for pick in picks})
 
+    def get_group_categories_for_guest(self, *, guest_id: str, group_id: str) -> list[str]:
+        guest = self.get_guest_profile(guest_id=guest_id)
+        if guest is None:
+            return []
+
+        today = date.today()
+        rates = self._rates_repo.get_daily_rates(today, today + timedelta(days=90))
+        group_rules = self._rules_repo.get_group_rules()
+        return find_group_categories_for_guest(
+            daily_rates=rates,
+            group_rules=group_rules,
+            guest=guest,
+            group_id=group_id,
+        )
+
     def get_best_period_details_for_category(
         self,
         *,
         guest_id: str,
         group_id: str,
         category_name: str,
-        top_k: int = 200,
     ) -> tuple[PeriodPickDTO | None, list[PeriodQuote]]:
-        picks = self.get_best_periods(guest_id=guest_id, group_id=group_id, top_k=top_k)
-        selected_pick = next((pick for pick in picks if pick.category_name == category_name), None)
+        guest = self.get_guest_profile(guest_id=guest_id)
+        if guest is None:
+            return None, []
+
+        today = date.today()
+        date_to = today + timedelta(days=90)
+        rates = self._rates_repo.get_daily_rates(today, date_to)
+        offers = self._offers_repo.get_offers(today)
+        group_rules = self._rules_repo.get_group_rules()
+        child_policies = self._rules_repo.get_child_policies()
+        ctx = PricingContext(
+            booking_date=today,
+            loyalty_status=guest.loyalty_status,
+            bank_status=guest.bank_status,
+            children_4_13=guest.occupancy.children_4_13,
+        )
+        selected_pick = find_best_period_for_category(
+            daily_rates=rates,
+            offers=offers,
+            group_rules=group_rules,
+            child_policies=child_policies,
+            guest=guest,
+            ctx=ctx,
+            group_id=group_id,
+            category_name=category_name,
+            date_from=today,
+            date_to=date_to,
+        )
         if selected_pick is None:
             return None, []
 
