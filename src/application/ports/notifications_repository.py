@@ -12,3 +12,6 @@ class NotificationsRepository(Protocol):
 
     def mark_sent(self, rows: list[MatchedDateRecord], *, run_id: str) -> None:
         ...
+
+    def get_run_rows(self, run_id: str, *, guest_id: str | None = None) -> list[MatchedDateRecord]:
+        ...

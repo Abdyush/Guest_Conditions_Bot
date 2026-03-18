@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import logging
 import os
-from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from uuid import uuid4
 
+from src.application.dto.admin_dashboard import AdminReport, AdminStatistics
 from src.application.dto.get_best_period_query import GetBestPeriodQuery
+from src.application.dto.guest_notification_batch import GuestNotificationBatch
 from src.application.dto.get_period_quotes_query import GetPeriodQuotesQuery
 from src.application.dto.matched_date_record import MatchedDateRecord
 from src.application.dto.period_pick import PeriodPickDTO
@@ -17,6 +18,9 @@ from src.application.use_cases.find_best_period_for_category import find_best_pe
 from src.application.use_cases.find_group_categories_for_guest import find_group_categories_for_guest
 from src.application.use_cases.get_best_periods_for_guest_in_group import GetBestPeriodsForGuestInGroup
 from src.application.use_cases.get_period_quotes_from_matches_run import GetPeriodQuotesFromMatchesRun
+from src.application.use_cases.get_admin_reports import GetAdminReports
+from src.application.use_cases.get_admin_statistics import GetAdminStatistics
+from src.application.use_cases.prepare_guest_notification_batches import PrepareGuestNotificationBatches
 from src.domain.entities.guest_preferences import GuestPreferences
 from src.domain.services.category_capacity import Occupancy
 from src.domain.services.date_price_selector import DatePriceSelector
@@ -26,22 +30,17 @@ from src.domain.services.pricing_service import PricingService
 from src.domain.value_objects.bank import BankStatus
 from src.domain.value_objects.loyalty import LoyaltyPolicy, LoyaltyStatus
 from src.domain.value_objects.money import Money
+from src.infrastructure.repositories.postgres_admin_events_repository import PostgresAdminEventsRepository
+from src.infrastructure.repositories.postgres_admin_insights_repository import PostgresAdminInsightsRepository
 from src.infrastructure.repositories.postgres_daily_rates_repository import PostgresDailyRatesRepository
 from src.infrastructure.repositories.postgres_desired_matches_run_repository import PostgresDesiredMatchesRunRepository
 from src.infrastructure.repositories.postgres_guests_repository import PostgresGuestsRepository
 from src.infrastructure.repositories.postgres_matches_run_repository import PostgresMatchesRunRepository
+from src.infrastructure.repositories.postgres_notifications_repository import PostgresNotificationsRepository
 from src.infrastructure.repositories.postgres_offers_repository import PostgresOffersRepository
 from src.infrastructure.repositories.postgres_rules_repository import PostgresRulesRepository
 from src.infrastructure.repositories.postgres_user_identities_repository import PostgresUserIdentitiesRepository
 from src.infrastructure.synchronization.recalculation_run_coordinator import RecalculationRunCoordinator
-
-
-@dataclass(frozen=True, slots=True)
-class GuestNotificationTarget:
-    guest_id: str
-    guest_name: str
-    telegram_user_ids: list[int]
-    category_names: list[str]
 
 
 logger = logging.getLogger(__name__)
@@ -53,11 +52,14 @@ class TelegramUseCasesAdapter:
     def __init__(self):
         self._identities_repo = PostgresUserIdentitiesRepository()
         self._guests_repo = PostgresGuestsRepository()
+        self._admin_events_repo = PostgresAdminEventsRepository()
+        self._admin_insights_repo = PostgresAdminInsightsRepository()
         self._rates_repo = PostgresDailyRatesRepository()
         self._offers_repo = PostgresOffersRepository()
         self._rules_repo = PostgresRulesRepository()
         self._matches_run_repo = PostgresMatchesRunRepository()
         self._desired_matches_run_repo = PostgresDesiredMatchesRunRepository()
+        self._notifications_repo = PostgresNotificationsRepository()
         self._best_periods_uc = GetBestPeriodsForGuestInGroup(
             rates_repo=self._rates_repo,
             offers_repo=self._offers_repo,
@@ -65,6 +67,18 @@ class TelegramUseCasesAdapter:
             rules_repo=self._rules_repo,
         )
         self._period_quotes_uc = GetPeriodQuotesFromMatchesRun(self._matches_run_repo)
+        self._get_admin_reports_uc = GetAdminReports(events_repo=self._admin_events_repo)
+        self._get_admin_statistics_uc = GetAdminStatistics(
+            insights_repo=self._admin_insights_repo,
+            events_repo=self._admin_events_repo,
+        )
+        self._prepare_notification_batches_uc = PrepareGuestNotificationBatches(
+            desired_matches_repo=self._desired_matches_run_repo,
+            notifications_repo=self._notifications_repo,
+            guests_repo=self._guests_repo,
+            identities_repo=self._identities_repo,
+            provider=self._provider(),
+        )
         if TelegramUseCasesAdapter._recalculation_coordinator is None:
             lock_key = int(os.getenv("RECALC_ADVISORY_LOCK_KEY", "90412031"))
             TelegramUseCasesAdapter._recalculation_coordinator = RecalculationRunCoordinator(
@@ -453,24 +467,34 @@ class TelegramUseCasesAdapter:
                 return offer.description
         return None
 
-    def build_notification_targets(self) -> list[GuestNotificationTarget]:
-        guests = {x.guest_id: x for x in self._guests_repo.get_active_guests() if x.guest_id}
-        out: list[GuestNotificationTarget] = []
-        for guest_id in sorted(guests.keys()):
-            categories = self.get_available_categories(guest_id=guest_id)
-            telegram_ids = self.list_telegram_user_ids_for_guest(guest_id=guest_id)
-            if not telegram_ids:
-                continue
-            guest = guests[guest_id]
-            out.append(
-                GuestNotificationTarget(
-                    guest_id=guest_id,
-                    guest_name=guest.guest_name or "Гость",
-                    telegram_user_ids=telegram_ids,
-                    category_names=categories,
-                )
-            )
-        return out
+    def prepare_new_notification_batches(self, *, run_id: str, as_of_date: date | None = None) -> list[GuestNotificationBatch]:
+        actual_date = as_of_date or date.today()
+        return self._prepare_notification_batches_uc.execute(run_id=run_id, as_of_date=actual_date)
+
+    def mark_notification_rows_sent(self, *, run_id: str, rows: list[MatchedDateRecord]) -> None:
+        self._notifications_repo.mark_sent(rows, run_id=run_id)
+
+    def get_notification_categories_with_groups(self, *, guest_id: str, run_id: str) -> list[tuple[str, str]]:
+        rows = self._notifications_repo.get_run_rows(run_id, guest_id=guest_id)
+        pairs = sorted(
+            {
+                (row.category_name, row.group_id)
+                for row in rows
+                if row.guest_id == guest_id and row.category_name and row.group_id
+            },
+            key=lambda item: (item[1], item[0]),
+        )
+        return pairs
+
+    def get_notification_category_matches(self, *, guest_id: str, run_id: str, category_name: str) -> tuple[str, list[MatchedDateRecord]]:
+        rows = self._notifications_repo.get_run_rows(run_id, guest_id=guest_id)
+        out = [
+            row
+            for row in rows
+            if row.guest_id == guest_id and row.category_name == category_name
+        ]
+        out.sort(key=lambda item: (item.date, item.period_end or item.date, item.tariff))
+        return run_id, out
 
     def get_last_room_dates(
         self,
@@ -500,6 +524,30 @@ class TelegramUseCasesAdapter:
             }
         )
         return out
+
+    def log_admin_event(
+        self,
+        *,
+        event_type: str,
+        status: str,
+        trigger: str | None = None,
+        message: str | None = None,
+        user_id: int | None = None,
+    ) -> None:
+        self._admin_events_repo.log_event(
+            event_type=event_type,
+            status=status,
+            trigger=trigger,
+            message=message,
+            user_id=user_id,
+            created_at=datetime.now(timezone.utc).replace(tzinfo=None),
+        )
+
+    def get_admin_reports(self) -> dict[str, AdminReport]:
+        return self._get_admin_reports_uc.execute(now=datetime.now(timezone.utc).replace(tzinfo=None))
+
+    def get_admin_statistics(self) -> AdminStatistics:
+        return self._get_admin_statistics_uc.execute(now=datetime.now(timezone.utc).replace(tzinfo=None))
 
 
 def _parse_percent(value: str | None) -> Decimal | None:

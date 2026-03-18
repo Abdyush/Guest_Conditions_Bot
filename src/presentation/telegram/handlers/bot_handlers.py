@@ -10,6 +10,7 @@ from src.presentation.telegram.callbacks.data_parser import (
     NAV_BACK_BEST_CATEGORIES,
     NAV_BACK_BEST_GROUPS,
     NAV_BACK_MAIN,
+    NAV_BACK_NOTIFICATION_GROUPS,
     NAV_BACK_NOTIFIED_CATEGORIES,
     NAV_BACK_QUOTES_CALENDAR,
     NAV_BACK_QUOTES_CATEGORIES,
@@ -23,6 +24,10 @@ from src.presentation.telegram.callbacks.data_parser import (
     PREFIX_BEST_OFFER,
     PREFIX_BEST_RESULT,
     PREFIX_CALENDAR,
+    PREFIX_NOTIFICATION_CATEGORY,
+    PREFIX_NOTIFICATION_GROUP,
+    PREFIX_NOTIFICATION_OFFER,
+    PREFIX_NOTIFICATION_PERIOD,
     PREFIX_NOTIFIED_CATEGORY,
     PREFIX_NOTIFIED_OFFER,
     PREFIX_NOTIFIED_PERIOD,
@@ -34,8 +39,10 @@ from src.presentation.telegram.callbacks.data_parser import (
 )
 from src.presentation.telegram.handlers.dependencies import TelegramHandlersDependencies
 from src.presentation.telegram.handlers.scenarios.admin_commands import AdminCommandsScenario
+from src.presentation.telegram.handlers.scenarios.admin_menu import AdminMenuScenario
 from src.presentation.telegram.handlers.scenarios.available_offers import AvailableOffersScenario
 from src.presentation.telegram.handlers.scenarios.best_periods import BestPeriodsScenario
+from src.presentation.telegram.handlers.scenarios.notification_offers import NotificationOffersScenario
 from src.presentation.telegram.handlers.scenarios.onboarding import OnboardingScenario
 from src.presentation.telegram.handlers.scenarios.period_quotes import PeriodQuotesScenario
 from src.presentation.telegram.handlers.scenarios.registration import RegistrationScenario
@@ -75,15 +82,30 @@ MAIN_MENU_ACTION_BUTTONS = {
 
 
 class TelegramBotHandlers:
-    def __init__(self, *, adapter: TelegramUseCasesAdapter, sessions: InMemorySessionStore, pipeline: PipelineOrchestrator):
+    def __init__(
+        self,
+        *,
+        adapter: TelegramUseCasesAdapter,
+        sessions: InMemorySessionStore,
+        pipeline: PipelineOrchestrator,
+        admin_telegram_id: int | None,
+    ):
         flow_guard = TelegramFlowGuard(sessions=sessions)
-        deps = TelegramHandlersDependencies(adapter=adapter, sessions=sessions, pipeline=pipeline, flow_guard=flow_guard)
+        deps = TelegramHandlersDependencies(
+            adapter=adapter,
+            sessions=sessions,
+            pipeline=pipeline,
+            flow_guard=flow_guard,
+            admin_telegram_id=admin_telegram_id,
+        )
         self._deps = deps
         self._onboarding = OnboardingScenario(deps=deps)
         self._registration = RegistrationScenario(deps=deps)
+        self._admin_menu = AdminMenuScenario(deps=deps)
         self._best_periods = BestPeriodsScenario(deps=deps)
         self._period_quotes = PeriodQuotesScenario(deps=deps)
         self._available_offers = AvailableOffersScenario(deps=deps)
+        self._notification_offers = NotificationOffersScenario(deps=deps)
         self._admin_commands = AdminCommandsScenario(deps=deps)
 
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -97,6 +119,9 @@ class TelegramBotHandlers:
 
     async def parser_offer(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await self._admin_commands.parser_offer(update, context)
+
+    async def admin_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        await self._admin_menu.open_admin_menu(update, context)
 
     async def on_contact(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await self._onboarding.on_contact(update, context)
@@ -135,6 +160,12 @@ class TelegramBotHandlers:
         if data == NAV_BACK_BEST_CATEGORIES:
             await self._best_periods.handle_nav_back_categories(user.id, query)
             return
+        if data.startswith(NAV_BACK_NOTIFICATION_GROUPS):
+            if active_flow not in {None, ActiveFlow.NOTIFICATION_OFFERS}:
+                await query.answer()
+                return
+            await self._notification_offers.handle_nav_back_groups(user.id, query, data)
+            return
         if data == NAV_BACK_AVAILABLE_CATEGORIES:
             if active_flow != ActiveFlow.AVAILABLE_ROOMS:
                 await query.answer()
@@ -160,6 +191,9 @@ class TelegramBotHandlers:
         if active_flow == ActiveFlow.BEST_PERIODS and not self._is_best_periods_flow_callback(data):
             await query.answer()
             return
+        if active_flow == ActiveFlow.NOTIFICATION_OFFERS and not self._is_notification_flow_callback(data):
+            await query.answer()
+            return
         if active_flow == ActiveFlow.PERIOD_QUOTES and not self._is_period_quotes_flow_callback(data):
             await query.answer()
             return
@@ -175,6 +209,30 @@ class TelegramBotHandlers:
             return
         if data.startswith(PREFIX_BEST_RESULT):
             await self._best_periods.handle_best_result_callback(user.id, query, data)
+            return
+        if data.startswith(PREFIX_NOTIFICATION_GROUP):
+            if active_flow not in {None, ActiveFlow.NOTIFICATION_OFFERS}:
+                await query.answer()
+                return
+            await self._notification_offers.handle_group_callback(user.id, query, data)
+            return
+        if data.startswith(PREFIX_NOTIFICATION_CATEGORY):
+            if active_flow not in {None, ActiveFlow.NOTIFICATION_OFFERS}:
+                await query.answer()
+                return
+            await self._notification_offers.handle_category_callback(user.id, query, data)
+            return
+        if data.startswith(PREFIX_NOTIFICATION_PERIOD):
+            if active_flow not in {None, ActiveFlow.NOTIFICATION_OFFERS}:
+                await query.answer()
+                return
+            await self._notification_offers.handle_period_callback(user.id, query, data)
+            return
+        if data.startswith(PREFIX_NOTIFICATION_OFFER):
+            if active_flow not in {None, ActiveFlow.NOTIFICATION_OFFERS}:
+                await query.answer()
+                return
+            await self._notification_offers.handle_offer_callback(user.id, query, data)
             return
         if data.startswith(PREFIX_QUOTES_GROUP):
             await self._period_quotes.handle_quotes_group_callback(user.id, query, data)
@@ -257,9 +315,13 @@ class TelegramBotHandlers:
 
         if await self._registration.handle_flow_text(user.id, text, message):
             return
+        if await self._admin_menu.handle_flow_text(user.id, text, message):
+            return
         if await self._available_offers.handle_flow_text(user.id, text, message):
             return
         if await self._best_periods.handle_flow_text(user.id, text, message):
+            return
+        if await self._notification_offers.handle_flow_text(user.id, message):
             return
         if await self._period_quotes.handle_flow_text(user.id, text, message):
             return
@@ -346,6 +408,8 @@ class TelegramBotHandlers:
 
         if await self._registration.handle_back(telegram_user_id, message, guest_id):
             return
+        if await self._admin_menu.handle_back(telegram_user_id, message):
+            return
         if await self._period_quotes.handle_back(telegram_user_id, message, guest_id):
             return
         if await self._best_periods.handle_back(telegram_user_id, message, guest_id):
@@ -395,5 +459,16 @@ class TelegramBotHandlers:
                 PREFIX_BEST_CATEGORY,
                 PREFIX_BEST_OFFER,
                 PREFIX_BEST_RESULT,
+            )
+        )
+
+    @staticmethod
+    def _is_notification_flow_callback(data: str) -> bool:
+        return data.startswith(NAV_BACK_NOTIFICATION_GROUPS) or data.startswith(
+            (
+                PREFIX_NOTIFICATION_GROUP,
+                PREFIX_NOTIFICATION_CATEGORY,
+                PREFIX_NOTIFICATION_PERIOD,
+                PREFIX_NOTIFICATION_OFFER,
             )
         )

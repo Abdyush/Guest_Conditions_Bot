@@ -18,6 +18,7 @@ from telegram.ext import Application, CallbackQueryHandler, CommandHandler, Mess
 from src.infrastructure.parsers.selenium_offers_parser_runner import SeleniumOffersParserRunner
 from src.infrastructure.parsers.selenium_rates_parser_runner import SeleniumRatesParserRunner
 from src.presentation.telegram.handlers.bot_handlers import TelegramBotHandlers
+from src.presentation.telegram.settings import load_telegram_settings
 from src.presentation.telegram.services.pipeline_orchestrator import PipelineOrchestrator
 from src.presentation.telegram.services.use_cases_adapter import TelegramUseCasesAdapter
 from src.presentation.telegram.state.session_store import InMemorySessionStore
@@ -57,6 +58,7 @@ def build_bot_application() -> Application:
     rules_csv_path = str(root / "data" / "category_rules.csv")
     headless = os.getenv("SELENIUM_VISIBLE", "").strip().lower() not in {"1", "true", "yes"}
     wait_seconds = int(os.getenv("SELENIUM_WAIT_SECONDS", "20"))
+    telegram_settings = load_telegram_settings()
     timezone_name = os.getenv("BOT_TIMEZONE", "Europe/Moscow")
     try:
         bot_tz = ZoneInfo(timezone_name)
@@ -89,7 +91,12 @@ def build_bot_application() -> Application:
         rates_runner=rates_runner,
         offers_runner=offers_runner,
     )
-    handlers = TelegramBotHandlers(adapter=adapter, sessions=sessions, pipeline=pipeline)
+    handlers = TelegramBotHandlers(
+        adapter=adapter,
+        sessions=sessions,
+        pipeline=pipeline,
+        admin_telegram_id=telegram_settings.admin_telegram_id,
+    )
 
     app = Application.builder().token(token).build()
 
@@ -103,15 +110,28 @@ def build_bot_application() -> Application:
                 user_id,
                 err,
             )
+            adapter.log_admin_event(
+                event_type="telegram_blocked",
+                status="success",
+                user_id=user_id,
+                message=str(err),
+            )
             if user_id is not None:
                 adapter.unbind_telegram(telegram_user_id=user_id)
             return
+        adapter.log_admin_event(
+            event_type="telegram_user_error",
+            status="error",
+            user_id=user_id,
+            message=str(err),
+        )
         logging.getLogger(__name__).exception("telegram_unhandled_error user_id=%s", user_id, exc_info=err)
 
     app.add_handler(CommandHandler("start", handlers.start))
     app.add_handler(CommandHandler("unlink", handlers.unlink))
     app.add_handler(CommandHandler("parser_categ", handlers.parser_categ))
     app.add_handler(CommandHandler("parser_offer", handlers.parser_offer))
+    app.add_handler(CommandHandler("admin_menu", handlers.admin_menu))
     app.add_handler(CallbackQueryHandler(handlers.on_callback))
     app.add_handler(MessageHandler(filters.CONTACT, handlers.on_contact))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handlers.on_text))

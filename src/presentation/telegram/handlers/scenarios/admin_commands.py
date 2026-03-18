@@ -20,6 +20,9 @@ class AdminCommandsScenario:
         message = update.effective_message
         if user is None or message is None:
             return
+        if self._deps.admin_telegram_id is None or user.id != self._deps.admin_telegram_id:
+            await message.reply_text("Команда недоступна.")
+            return
         logger.info("telegram_update type=command user_id=%s command=/parser_categ", user.id)
         attempt = await self._deps.pipeline.run_categories_parser(trigger=f"manual:telegram:{user.id}")
         if not attempt.started:
@@ -34,6 +37,9 @@ class AdminCommandsScenario:
         user = update.effective_user
         message = update.effective_message
         if user is None or message is None:
+            return
+        if self._deps.admin_telegram_id is None or user.id != self._deps.admin_telegram_id:
+            await message.reply_text("Команда недоступна.")
             return
         logger.info("telegram_update type=command user_id=%s command=/parser_offer", user.id)
         attempt = await self._deps.pipeline.run_offers_parser(trigger=f"manual:telegram:{user.id}")

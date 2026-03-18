@@ -85,6 +85,17 @@ class PostgresNotificationsRepository(NotificationsRepository):
         with self._engine.begin() as conn:
             conn.execute(stmt)
 
+    def get_run_rows(self, run_id: str, *, guest_id: str | None = None) -> list[MatchedDateRecord]:
+        stmt = select(notifications_table).where(notifications_table.c.run_id == run_id)
+        if guest_id is not None:
+            stmt = stmt.where(notifications_table.c.guest_id == guest_id)
+
+        out: list[MatchedDateRecord] = []
+        with self._engine.connect() as conn:
+            for row in conn.execute(stmt).mappings():
+                out.append(self._from_db_row(row))
+        return out
+
     def _prune_and_normalize_existing(self, as_of_date: date) -> None:
         with self._engine.begin() as conn:
             existing = list(conn.execute(select(notifications_table)).mappings())

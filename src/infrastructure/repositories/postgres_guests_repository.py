@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import os
+from datetime import datetime
 
-from sqlalchemy import BIGINT, INTEGER, TEXT, Column, MetaData, Table, create_engine, select, text
+from sqlalchemy import BIGINT, INTEGER, TEXT, TIMESTAMP, Column, MetaData, Table, create_engine, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.engine import Engine
 
@@ -29,6 +30,7 @@ guests_table = Table(
     Column("infants_0_3", INTEGER, nullable=False),
     Column("loyalty_status", TEXT, nullable=True),
     Column("bank_status", TEXT, nullable=True),
+    Column("created_at", TIMESTAMP, nullable=True),
 )
 
 
@@ -57,6 +59,8 @@ class PostgresGuestsRepository(GuestsRepository):
     @staticmethod
     def _init_schema(engine: Engine) -> None:
         metadata.create_all(engine)
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE guest_details ADD COLUMN IF NOT EXISTS created_at TIMESTAMP"))
 
     def replace_all(self, guests: list[GuestPreferences]) -> None:
         with self._engine.begin() as conn:
@@ -122,6 +126,7 @@ class PostgresGuestsRepository(GuestsRepository):
             "infants_0_3": guest.occupancy.infants,
             "loyalty_status": guest.loyalty_status.value.upper() if guest.loyalty_status else None,
             "bank_status": guest.bank_status.value if guest.bank_status else None,
+            "created_at": datetime.now(),
         }
         stmt = insert(guests_table).values(values)
         stmt = stmt.on_conflict_do_update(

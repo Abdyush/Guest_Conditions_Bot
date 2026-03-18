@@ -14,3 +14,4 @@ class TelegramHandlersDependencies:
     sessions: InMemorySessionStore
     pipeline: PipelineOrchestrator
     flow_guard: TelegramFlowGuard
+    admin_telegram_id: int | None
