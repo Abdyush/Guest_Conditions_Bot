@@ -74,11 +74,13 @@ def render_available_period_details(*, category_name: str, period: AvailablePeri
 
     for tariff_key in _tariff_sort_keys(rows_by_tariff.keys()):
         row = rows_by_tariff[tariff_key]
+        benefit_minor = row.old_price_minor - row.new_price_minor
         lines.extend(
             [
                 f'Тариф: {tariff_label(row.tariff)}',
                 f"Цена открытого рынка: {format_rub(row.old_price_minor)}/сутки",
                 f"Ваша цена: {format_rub(row.new_price_minor)}/сутки",
+                f"Ваша выгода: {format_rub(benefit_minor)}/сутки",
                 "",
             ]
         )
@@ -227,3 +229,4 @@ def _group_bucket_label(*, group_id: str, category_name: str) -> str:
 def _tariff_sort_keys(keys) -> list[str]:
     order = {"breakfast": 0, "fullpansion": 1}
     return sorted(keys, key=lambda key: (order.get(key, 100), key))
+
