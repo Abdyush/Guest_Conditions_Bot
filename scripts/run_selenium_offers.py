@@ -13,7 +13,11 @@ ROOT = ensure_project_on_sys_path()
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run Selenium offers parser from legacy offers_funcs and print mapped offers.")
     parser.add_argument("--today", default=date.today().isoformat(), help="Booking date in YYYY-MM-DD format.")
-    parser.add_argument("--rules-csv", default=str(ROOT / "data" / "category_rules.csv"))
+    parser.add_argument(
+        "--rules-csv",
+        default="",
+        help="Deprecated and ignored. Category rules are loaded from Postgres.",
+    )
     parser.add_argument("--visible", action="store_true", help="Run Chrome with GUI.")
     parser.add_argument("--wait-seconds", type=int, default=20)
     parser.add_argument("--fail-fast", action="store_true", help="Stop if some offers fail to map.")
@@ -31,9 +35,12 @@ def main() -> None:
 
     from src.infrastructure.sources.selenium_offers_source import SeleniumOffersSource
     from src.infrastructure.repositories.postgres_offers_repository import PostgresOffersRepository
+    from src.infrastructure.repositories.postgres_rules_repository import PostgresRulesRepository
+
+    rules_repo = PostgresRulesRepository()
 
     source = SeleniumOffersSource(
-        category_rules_csv_path=args.rules_csv,
+        category_to_group=rules_repo.get_category_to_group(),
         headless=not args.visible,
         wait_seconds=args.wait_seconds,
         fail_fast=args.fail_fast,

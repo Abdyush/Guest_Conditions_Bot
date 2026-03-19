@@ -34,7 +34,7 @@ class BestPeriodsScenario:
         self._deps = deps
 
     async def open_group_picker(self, *, telegram_user_id: int, message) -> None:
-        guest_id = self._deps.adapter.resolve_guest_id(telegram_user_id=telegram_user_id)
+        guest_id = self._deps.identity.resolve_guest_id(telegram_user_id=telegram_user_id)
         if not guest_id:
             await self._deps.flow_guard.leave(telegram_user_id)
             await self._deps.sessions.set_state(telegram_user_id, ConversationState.AWAIT_PHONE_CONTACT)
@@ -70,7 +70,7 @@ class BestPeriodsScenario:
         return True
 
     async def handle_best_group_callback(self, telegram_user_id: int, query, data: str) -> None:
-        guest_id = self._deps.adapter.resolve_guest_id(telegram_user_id=telegram_user_id)
+        guest_id = self._deps.identity.resolve_guest_id(telegram_user_id=telegram_user_id)
         if not guest_id:
             await self._deps.flow_guard.leave(telegram_user_id)
             await self._deps.sessions.set_state(telegram_user_id, ConversationState.AWAIT_PHONE_CONTACT)
@@ -81,7 +81,7 @@ class BestPeriodsScenario:
 
         group_id = data.split(":", 1)[1].strip().upper()
         try:
-            category_names = self._deps.adapter.get_group_categories_for_guest(guest_id=guest_id, group_id=group_id)
+            category_names = self._deps.best_periods.get_group_categories_for_guest(guest_id=guest_id, group_id=group_id)
         except Exception:
             logger.exception("best_period_failed user_id=%s guest_id=%s", telegram_user_id, guest_id)
             await query.answer()
@@ -108,7 +108,7 @@ class BestPeriodsScenario:
             )
 
     async def handle_best_category_callback(self, telegram_user_id: int, query, data: str) -> None:
-        guest_id = self._deps.adapter.resolve_guest_id(telegram_user_id=telegram_user_id)
+        guest_id = self._deps.identity.resolve_guest_id(telegram_user_id=telegram_user_id)
         if not guest_id:
             await self._deps.flow_guard.leave(telegram_user_id)
             await self._deps.sessions.set_state(telegram_user_id, ConversationState.AWAIT_PHONE_CONTACT)
@@ -137,7 +137,7 @@ class BestPeriodsScenario:
         )
 
     async def handle_best_offer_callback(self, telegram_user_id: int, query, data: str) -> None:
-        guest_id = self._deps.adapter.resolve_guest_id(telegram_user_id=telegram_user_id)
+        guest_id = self._deps.identity.resolve_guest_id(telegram_user_id=telegram_user_id)
         if not guest_id:
             await self._deps.flow_guard.leave(telegram_user_id)
             await self._deps.sessions.set_state(telegram_user_id, ConversationState.AWAIT_PHONE_CONTACT)
@@ -163,7 +163,7 @@ class BestPeriodsScenario:
             await query.answer("Текст специального предложения не найден.", show_alert=False)
             return
 
-        offer_text = self._deps.adapter.get_offer_text(
+        offer_text = self._deps.best_periods.get_offer_text(
             offer_id=row_with_offer.offer_id,
             offer_title=row_with_offer.offer_title,
         )
@@ -178,7 +178,7 @@ class BestPeriodsScenario:
             )
 
     async def handle_best_result_callback(self, telegram_user_id: int, query, data: str) -> None:
-        guest_id = self._deps.adapter.resolve_guest_id(telegram_user_id=telegram_user_id)
+        guest_id = self._deps.identity.resolve_guest_id(telegram_user_id=telegram_user_id)
         if not guest_id:
             await self._deps.flow_guard.leave(telegram_user_id)
             await self._deps.sessions.set_state(telegram_user_id, ConversationState.AWAIT_PHONE_CONTACT)
@@ -251,7 +251,7 @@ class BestPeriodsScenario:
             return
 
         category_name, best_pick, quotes = result
-        last_room_dates = self._deps.adapter.get_last_room_dates(
+        last_room_dates = self._deps.best_periods.get_last_room_dates(
             guest_id=guest_id,
             category_name=category_name,
             period_start=best_pick.start_date,
@@ -301,7 +301,7 @@ class BestPeriodsScenario:
 
         category_name = category_names[category_idx]
         try:
-            best_pick, quotes = self._deps.adapter.get_best_period_details_for_category(
+            best_pick, quotes = self._deps.best_periods.get_best_period_details_for_category(
                 guest_id=guest_id,
                 group_id=draft.group_id,
                 category_name=category_name,
@@ -312,3 +312,5 @@ class BestPeriodsScenario:
         if best_pick is None:
             return None
         return category_name, best_pick, quotes
+
+

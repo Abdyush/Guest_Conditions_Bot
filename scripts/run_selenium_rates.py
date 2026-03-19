@@ -13,7 +13,14 @@ ROOT = ensure_project_on_sys_path()
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Run Selenium daily rates parser for one stay date (today by default)."
+        description=(
+            "Smoke/inspection utility: run the current Selenium rates parser stack "
+            "for one stay date and one adults count."
+        ),
+        epilog=(
+            "For a fuller manual parser run across multiple dates and adults counts, "
+            "use scripts/run_selenium_rates_parallel.py."
+        ),
     )
     parser.add_argument(
         "--stay-date",
@@ -24,12 +31,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--adults",
         type=int,
         default=1,
-        help="Adults count for produced rates (default: 1).",
+        help="Adults count for the single smoke run (default: 1).",
     )
     parser.add_argument(
         "--rules-csv",
-        default=str(ROOT / "data" / "category_rules.csv"),
-        help="Path to category rules CSV for group mapping.",
+        default="",
+        help="Deprecated and ignored. Category rules are loaded from Postgres.",
     )
     parser.add_argument(
         "--visible",
@@ -53,16 +60,24 @@ def main() -> None:
         raise ValueError("--adults must be > 0")
 
     stay_date = date.fromisoformat(args.stay_date)
-    from src.infrastructure.sources.selenium_daily_rates_source import SeleniumDailyRatesSource
-
-    source = SeleniumDailyRatesSource(
-        category_rules_csv_path=args.rules_csv,
-        adults_counts=[args.adults],
-        headless=not args.visible,
-        wait_seconds=args.wait_seconds,
+    from src.infrastructure.selenium.rates_parallel_runner import (
+        RatesParallelRunConfig,
+        SeleniumRatesParallelRunner,
     )
+    from src.infrastructure.repositories.postgres_rules_repository import PostgresRulesRepository
 
-    rates = source.get_daily_rates(stay_date, stay_date)
+    rules_repo = PostgresRulesRepository()
+
+    runner = SeleniumRatesParallelRunner(
+        RatesParallelRunConfig(
+            category_to_group=rules_repo.get_category_to_group(),
+            adults_counts=(args.adults,),
+            days_to_collect=1,
+            headless=not args.visible,
+            wait_seconds=args.wait_seconds,
+        )
+    )
+    rates = runner.run(start_date=stay_date)
     print(f"Parsed rates: {len(rates)} rows")
     print("date;category_name;group_id;tariff_code;adults_count;amount_minor;currency;is_last_room")
     for r in rates:

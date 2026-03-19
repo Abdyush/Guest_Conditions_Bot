@@ -161,7 +161,7 @@ class RegistrationScenario:
 
     async def handle_edit_step(self, telegram_user_id: int, text: str, message) -> None:
         session = await self._deps.sessions.get(telegram_user_id)
-        guest_id = self._deps.adapter.resolve_guest_id(telegram_user_id=telegram_user_id)
+        guest_id = self._deps.identity.resolve_guest_id(telegram_user_id=telegram_user_id)
         if not guest_id:
             session.state = ConversationState.AWAIT_PHONE_CONTACT
             await message.reply_text(msg("auth_required"), reply_markup=build_phone_request_keyboard())
@@ -182,7 +182,7 @@ class RegistrationScenario:
                 return
             if text == EDIT_GROUPS_BUTTON:
                 session.state = ConversationState.EDIT_GROUPS
-                profile = self._deps.adapter.get_guest_profile(guest_id=guest_id)
+                profile = self._deps.profile.get_guest_profile(guest_id=guest_id)
                 selected = profile.effective_allowed_groups if profile and profile.effective_allowed_groups else set()
                 session.registration = RegistrationDraft(allowed_groups=set(selected))
                 await message.reply_text(msg("reg_step_5"), reply_markup=build_categories_inline_keyboard(selected_codes=set(selected)))
@@ -208,35 +208,35 @@ class RegistrationScenario:
                 if v is None or v < 1:
                     await message.reply_text(msg("reg_adults_invalid"), reply_markup=build_numeric_edit_keyboard())
                     return
-                self._deps.adapter.update_guest_profile(guest_id=guest_id, adults=v)
+                self._deps.profile.update_guest_profile(guest_id=guest_id, adults=v)
             elif session.state == ConversationState.EDIT_CHILDREN_4_13:
                 v = parse_int(text)
                 if v is None or v < 0:
                     await message.reply_text(msg("reg_children_invalid"), reply_markup=build_numeric_edit_keyboard())
                     return
-                self._deps.adapter.update_guest_profile(guest_id=guest_id, children_4_13=v)
+                self._deps.profile.update_guest_profile(guest_id=guest_id, children_4_13=v)
             elif session.state == ConversationState.EDIT_INFANTS_0_3:
                 v = parse_int(text)
                 if v is None or v < 0:
                     await message.reply_text(msg("reg_infants_invalid"), reply_markup=build_numeric_edit_keyboard())
                     return
-                self._deps.adapter.update_guest_profile(guest_id=guest_id, infants_0_3=v)
+                self._deps.profile.update_guest_profile(guest_id=guest_id, infants_0_3=v)
             elif session.state == ConversationState.EDIT_LOYALTY:
                 if text not in LOYALTY_OPTIONS:
                     await message.reply_text(msg("reg_loyalty_invalid"), reply_markup=build_loyalty_keyboard())
                     return
-                self._deps.adapter.update_guest_profile(guest_id=guest_id, loyalty_status=text, bank_status="")
+                self._deps.profile.update_guest_profile(guest_id=guest_id, loyalty_status=text, bank_status="")
             elif session.state == ConversationState.EDIT_BANK:
                 if text not in BANK_LABEL_TO_CODE:
                     await message.reply_text(msg("reg_bank_invalid"), reply_markup=build_bank_keyboard())
                     return
-                self._deps.adapter.update_guest_profile(guest_id=guest_id, bank_status=BANK_LABEL_TO_CODE[text])
+                self._deps.profile.update_guest_profile(guest_id=guest_id, bank_status=BANK_LABEL_TO_CODE[text])
             elif session.state == ConversationState.EDIT_DESIRED_PRICE:
                 v = parse_decimal(text)
                 if v is None or v <= 0:
                     await message.reply_text(msg("reg_price_invalid"), reply_markup=build_numeric_edit_keyboard())
                     return
-                self._deps.adapter.update_guest_profile(guest_id=guest_id, desired_price_rub=v)
+                self._deps.profile.update_guest_profile(guest_id=guest_id, desired_price_rub=v)
             else:
                 return
         except Exception:
@@ -274,9 +274,9 @@ class RegistrationScenario:
                 if query.message is not None:
                     await query.message.reply_text(render_loyalty_prompt(), reply_markup=build_registration_loyalty_keyboard())
             else:
-                guest_id = self._deps.adapter.resolve_guest_id(telegram_user_id=telegram_user_id)
+                guest_id = self._deps.identity.resolve_guest_id(telegram_user_id=telegram_user_id)
                 if guest_id:
-                    self._deps.adapter.update_guest_profile(guest_id=guest_id, allowed_groups=set(selected))
+                    self._deps.profile.update_guest_profile(guest_id=guest_id, allowed_groups=set(selected))
                 session.state = ConversationState.EDIT_MENU
                 if query.message is not None:
                     await query.message.reply_text(msg("edit_saved"), reply_markup=build_edit_menu_keyboard())
@@ -374,7 +374,7 @@ class RegistrationScenario:
 
     async def _finish_registration(self, telegram_user_id: int, reg: RegistrationDraft, message) -> None:
         try:
-            guest_id = self._deps.adapter.register_guest_by_phone(
+            guest_id = self._deps.profile.register_guest_by_phone(
                 telegram_user_id=telegram_user_id,
                 phone=reg.phone or "",
                 name=reg.name or "",
@@ -419,3 +419,4 @@ def _normalize_loyalty_selection(value: str) -> str:
     if text == REGISTRATION_LOYALTY_NO_STATUS_BUTTON:
         return "White"
     return text
+

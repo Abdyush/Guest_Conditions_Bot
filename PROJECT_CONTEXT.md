@@ -5,28 +5,54 @@
 Проект использует Clean Architecture:
 - `domain` — бизнес-логика и value objects (`Money`, `Offer`, `Discount`, `PricingService`, bank/loyalty, occupancy и т.д.)
 - `application` — use cases, DTO, ports
-- `infrastructure` — реализации портов (CSV, PostgreSQL, notifier)
+- `infrastructure` — реализации портов, Postgres repositories, Selenium stack, orchestration
+- `presentation/telegram` — Telegram handlers, presenters, keyboards, state, isolated flows
+- `presentation/telegram/bootstrap` — runtime assembly, app creation, scheduler hookup
 
 БД: PostgreSQL  
 Доступ: SQLAlchemy 2.0 (sync)
 
-## 2) Текущий runtime-поток (`scripts/run_pipeline.py`)
+## 2) Текущий runtime-поток (`main.py`)
 
-Pipeline выполняет 2 фазы:
+Production runtime запускает Telegram-бота через `main.py`.
+Каталог `scripts/` не используется как production startup surface и предназначен только для ручных operational/admin/diagnostic задач.
 
-1. **Sync CSV -> Postgres** (перезапись справочников/снимков)
-   - `data/daily_rates.csv` -> `daily_rates` (TRUNCATE + INSERT)
-   - `data/special_offers.csv` -> `special_offers` (TRUNCATE + INSERT)
-   - `data/guest_details.csv` -> `guest_details` (TRUNCATE + INSERT)
-   - `data/category_rules.csv` -> `category_rules` (TRUNCATE + INSERT)
+Дальше pipeline работает из bot runtime:
+- nightly scheduler в Telegram bootstrap
+- manual system/admin triggers из Telegram admin flow
 
-2. **Расчёт и уведомления из Postgres-данных**
-   - use case читает rates/offers/guests/rules **только из Postgres repositories**
-   - сохраняет результат текущего прогона в `matches_run` (TRUNCATE + INSERT, с `run_id`)
-   - антиспам: сравнение с `notifications`, отправка только новых строк
-   - после отправки новые ключи записываются в `notifications`
+Актуальный pipeline:
 
-Важно: CSV больше не участвуют в расчёте напрямую после загрузки в БД.
+1. **Парсер цен**
+   - запускается через `SeleniumRatesParserRunner`
+   - сохраняет данные в `daily_rates`
+
+2. **Парсер офферов**
+   - запускается через `SeleniumOffersParserRunner`
+   - сохраняет данные в `special_offers`
+
+3. **Пересчёт**
+   - use case читает rates/offers/guests/rules из Postgres repositories
+   - сохраняет результат текущего прогона в `matches_run` и `desired_matches_run`
+
+4. **Уведомления**
+   - антиспам: сравнение с `notifications`
+   - отправляются только новые предложения
+   - после успешной доставки новые ключи записываются в `notifications`
+
+Category rules:
+
+- runtime/use cases читают `category_rules` из Postgres
+- parser mapping тоже использует `category_rules` из Postgres
+- CSV больше не участвует в production runtime path и может использоваться только как отдельный import artifact
+
+Runtime wiring:
+
+- `main.py` — production launcher
+- `src/presentation/telegram/bot.py` — тонкий entry point
+- `src/presentation/telegram/bootstrap/runtime.py` — dependency assembly
+- `src/presentation/telegram/bootstrap/application.py` — PTB app bootstrap и scheduler hookup
+- `src/infrastructure/orchestration/pipeline_orchestrator.py` — orchestration pipeline
 
 ## 3) Бизнес-правила ценообразования
 
@@ -63,7 +89,7 @@ Offer применим при выполнении всех условий:
 - фильтрует по порогу `desired_price_per_night`
 - возвращает `GuestResult` (`matched_lines`, `best_periods`)
 
-Замечание: persistence и отправка уведомлений находятся в pipeline-скрипте, а не внутри use case.
+Замечание: persistence и отправка уведомлений находятся в orchestration/runtime слое, а не внутри use case.
 
 ### `FindBestPeriodsInGroup`
 - ищет минимальную цену по округлению до рубля
@@ -73,7 +99,7 @@ Offer применим при выполнении всех условий:
 
 ## 6) Таблицы Postgres (актуально)
 
-### Входные/справочные (перезаписываются каждый запуск)
+### Входные/справочные runtime-данные
 - `daily_rates`
 - `special_offers`
 - `guest_details`
@@ -90,11 +116,45 @@ Offer применим при выполнении всех условий:
 
 ## 7) Основные файлы запуска
 
-- основной сценарий: `scripts/run_pipeline.py`
-- `scripts/run_fake.py` и `scripts/run_sample_case.py` не требуются для production pipeline (могут использоваться как demo/debug)
+- production runtime: `main.py`
+- ручные parser/query utilities находятся в `scripts/`
+- duplicate launcher `scripts/run_telegram_bot.py` удалён и больше не считается допустимым способом запуска runtime
+
+Оставшиеся manual/admin/diagnostic scripts:
+
+- `scripts/run_selenium_rates.py`
+  - smoke/inspection utility для одного stay date и одного adults count
+- `scripts/run_selenium_rates_parallel.py`
+  - full manual rates parser utility для диапазона дат и нескольких adults counts
+- `scripts/run_selenium_offers.py`
+  - ручной запуск offers parser
+- `scripts/get_best_period.py`
+  - support/query utility для лучшего периода
+- `scripts/get_period_quotes.py`
+  - support/query utility для quotes из `matches_run`
+- `scripts/link_user_identity.py`
+  - ручная привязка external identity к `guest_id`
+- `scripts/unlink_user_identity.py`
+  - ручное удаление identity linkage
 
 ## 8) Требования окружения
 
 - `DATABASE_URL` в `.env` (формат `postgresql+psycopg2://...`)
 - установлены зависимости `sqlalchemy`, `psycopg2-binary`, `python-dotenv`
-- запуск: `python scripts/run_pipeline.py --date-from YYYY-MM-DD --date-to YYYY-MM-DD`
+- запуск production runtime: `python main.py`
+
+## 9) Принятые Архитектурные Решения
+
+- giant Telegram adapter больше не используется как единый business gateway
+- composition/wiring вынесены из `bot.py` и старого adapter surface
+- pipeline orchestration вынесен из `presentation` в `infrastructure/orchestration`
+- Telegram delivery отделён от orchestration
+- legacy-manual contour вокруг `scripts/run_pipeline.py` удалён
+- rates parser CLI surface сохранена в двух ролях:
+  - smoke tool
+  - full manual parser tool
+
+## 10) Отложенные Темы
+
+- coexistence `python-telegram-bot` и `aiogram` state stack пока не унифицирован
+- remaining manual/admin scripts пока не консолидировались дальше без отдельного safe этапа

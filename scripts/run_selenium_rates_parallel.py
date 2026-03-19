@@ -13,7 +13,14 @@ ROOT = ensure_project_on_sys_path()
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Run 6 parallel Selenium rates parsers (adults 1..6) for a date window."
+        description=(
+            "Full manual rates parser utility: run the current parallel Selenium rates "
+            "parser stack for a date window and one or more adults counts."
+        ),
+        epilog=(
+            "For a narrower single-date/single-adult smoke check, "
+            "use scripts/run_selenium_rates.py."
+        ),
     )
     parser.add_argument(
         "--start-date",
@@ -29,12 +36,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--adults",
         default="1,2,3,4,5,6",
-        help="Comma-separated adults counts for parallel runs (default: 1,2,3,4,5,6).",
+        help="Comma-separated adults counts for the full manual parser run (default: 1,2,3,4,5,6).",
     )
     parser.add_argument(
         "--rules-csv",
-        default=str(ROOT / "data" / "category_rules.csv"),
-        help="Path to category rules CSV for group mapping.",
+        default="",
+        help="Deprecated and ignored. Category rules are loaded from Postgres.",
     )
     parser.add_argument(
         "--visible",
@@ -73,9 +80,12 @@ def main() -> None:
         RatesParallelRunConfig,
         SeleniumRatesParallelRunner,
     )
+    from src.infrastructure.repositories.postgres_rules_repository import PostgresRulesRepository
+
+    rules_repo = PostgresRulesRepository()
 
     config = RatesParallelRunConfig(
-        category_rules_csv_path=args.rules_csv,
+        category_to_group=rules_repo.get_category_to_group(),
         adults_counts=_parse_adults(args.adults),
         days_to_collect=args.days_to_collect,
         headless=not args.visible,

@@ -46,7 +46,7 @@ class NotificationOffersScenario:
         return True
 
     async def handle_group_callback(self, telegram_user_id: int, query, data: str) -> None:
-        guest_id = self._deps.adapter.resolve_guest_id(telegram_user_id=telegram_user_id)
+        guest_id = self._deps.identity.resolve_guest_id(telegram_user_id=telegram_user_id)
         if not guest_id:
             await query.answer()
             if query.message is not None:
@@ -81,7 +81,7 @@ class NotificationOffersScenario:
             )
 
     async def handle_category_callback(self, telegram_user_id: int, query, data: str) -> None:
-        guest_id = self._deps.adapter.resolve_guest_id(telegram_user_id=telegram_user_id)
+        guest_id = self._deps.identity.resolve_guest_id(telegram_user_id=telegram_user_id)
         if not guest_id:
             await query.answer()
             if query.message is not None:
@@ -104,7 +104,7 @@ class NotificationOffersScenario:
             return
 
         category_name = categories[category_idx]
-        _, rows = self._deps.adapter.get_notification_category_matches(
+        _, rows = self._deps.notifications.get_notification_category_matches(
             guest_id=guest_id,
             run_id=run_id,
             category_name=category_name,
@@ -130,7 +130,7 @@ class NotificationOffersScenario:
             )
 
     async def handle_period_callback(self, telegram_user_id: int, query, data: str) -> None:
-        guest_id = self._deps.adapter.resolve_guest_id(telegram_user_id=telegram_user_id)
+        guest_id = self._deps.identity.resolve_guest_id(telegram_user_id=telegram_user_id)
         if not guest_id:
             await query.answer()
             if query.message is not None:
@@ -153,7 +153,7 @@ class NotificationOffersScenario:
             return
 
         category_name = categories[category_idx]
-        _, rows = self._deps.adapter.get_notification_category_matches(
+        _, rows = self._deps.notifications.get_notification_category_matches(
             guest_id=guest_id,
             run_id=run_id,
             category_name=category_name,
@@ -164,7 +164,7 @@ class NotificationOffersScenario:
             return
 
         period = periods[period_idx]
-        last_room_dates = self._deps.adapter.get_last_room_dates(
+        last_room_dates = self._deps.notifications.get_last_room_dates(
             guest_id=guest_id,
             category_name=category_name,
             period_start=period.start,
@@ -187,7 +187,7 @@ class NotificationOffersScenario:
             )
 
     async def handle_offer_callback(self, telegram_user_id: int, query, data: str) -> None:
-        guest_id = self._deps.adapter.resolve_guest_id(telegram_user_id=telegram_user_id)
+        guest_id = self._deps.identity.resolve_guest_id(telegram_user_id=telegram_user_id)
         if not guest_id:
             await query.answer()
             if query.message is not None:
@@ -210,7 +210,7 @@ class NotificationOffersScenario:
             return
         category_name = categories[category_idx]
 
-        _, rows = self._deps.adapter.get_notification_category_matches(
+        _, rows = self._deps.notifications.get_notification_category_matches(
             guest_id=guest_id,
             run_id=run_id,
             category_name=category_name,
@@ -226,7 +226,7 @@ class NotificationOffersScenario:
             await query.answer("Текст специального предложения не найден.", show_alert=False)
             return
 
-        offer_text = self._deps.adapter.get_offer_text(offer_id=row_with_offer.offer_id, offer_title=row_with_offer.offer_title)
+        offer_text = self._deps.notifications.get_offer_text(offer_id=row_with_offer.offer_id, offer_title=row_with_offer.offer_title)
         if not offer_text:
             offer_text = "Текст специального предложения недоступен."
 
@@ -243,7 +243,7 @@ class NotificationOffersScenario:
             )
 
     async def handle_nav_back_groups(self, telegram_user_id: int, query, data: str) -> None:
-        guest_id = self._deps.adapter.resolve_guest_id(telegram_user_id=telegram_user_id)
+        guest_id = self._deps.identity.resolve_guest_id(telegram_user_id=telegram_user_id)
         if not guest_id:
             await query.answer()
             if query.message is not None:
@@ -271,7 +271,7 @@ class NotificationOffersScenario:
             )
 
     def _notification_groups_for_guest(self, *, guest_id: str, run_id: str):
-        category_groups = self._deps.adapter.get_notification_categories_with_groups(guest_id=guest_id, run_id=run_id)
+        category_groups = self._deps.notifications.get_notification_categories_with_groups(guest_id=guest_id, run_id=run_id)
         return build_available_groups(category_groups=category_groups)
 
 
@@ -310,3 +310,5 @@ def _parse_back_groups_callback(data: str) -> str | None:
     if len(parts) != 3 or parts[0] != "nav" or parts[1] != "back_notification_groups":
         return None
     return parts[2]
+
+

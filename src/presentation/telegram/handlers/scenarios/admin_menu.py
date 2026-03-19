@@ -137,7 +137,7 @@ class AdminMenuScenario:
         return False
 
     async def _handle_report_action(self, *, text: str, message) -> bool:
-        reports = self._deps.adapter.get_admin_reports()
+        reports = self._deps.admin.get_admin_reports()
         report_key_by_button = {
             ADMIN_REPORT_RATES_BUTTON: "parser_rates",
             ADMIN_REPORT_OFFERS_BUTTON: "parser_offers",
@@ -151,7 +151,7 @@ class AdminMenuScenario:
         return True
 
     async def _handle_statistics_action(self, *, text: str, message) -> bool:
-        stats = self._deps.adapter.get_admin_statistics()
+        stats = self._deps.admin.get_admin_statistics()
         if text == ADMIN_STATS_TOTAL_USERS_BUTTON:
             await message.reply_text(render_total_users(stats.total_users), reply_markup=build_admin_statistics_keyboard())
             return True
@@ -176,10 +176,11 @@ class AdminMenuScenario:
             return True
         if session.state == ConversationState.ADMIN_MENU:
             await self._deps.sessions.reset(telegram_user_id)
-            guest_id = self._deps.adapter.resolve_guest_id(telegram_user_id=telegram_user_id)
+            guest_id = self._deps.identity.resolve_guest_id(telegram_user_id=telegram_user_id)
             if guest_id:
                 await send_main_menu_for_guest(deps=self._deps, message=message, guest_id=guest_id)
             else:
                 await message.reply_text("Меню администратора закрыто.", reply_markup=build_main_menu_keyboard())
             return True
         return False
+

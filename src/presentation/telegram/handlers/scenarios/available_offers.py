@@ -40,7 +40,7 @@ class AvailableOffersScenario:
         self._deps = deps
 
     async def open_available_categories(self, telegram_user_id: int, message) -> None:
-        guest_id = self._deps.adapter.resolve_guest_id(telegram_user_id=telegram_user_id)
+        guest_id = self._deps.identity.resolve_guest_id(telegram_user_id=telegram_user_id)
         if not guest_id:
             await self._deps.flow_guard.leave(telegram_user_id)
             await message.reply_text(msg("auth_required"), reply_markup=build_phone_request_keyboard())
@@ -81,7 +81,7 @@ class AvailableOffersScenario:
         return True
 
     async def handle_available_category_callback(self, telegram_user_id: int, query, data: str) -> None:
-        guest_id = self._deps.adapter.resolve_guest_id(telegram_user_id=telegram_user_id)
+        guest_id = self._deps.identity.resolve_guest_id(telegram_user_id=telegram_user_id)
         if not guest_id:
             await self._deps.flow_guard.leave(telegram_user_id)
             await query.answer()
@@ -106,7 +106,7 @@ class AvailableOffersScenario:
         await query.answer()
 
     async def handle_available_period_callback(self, telegram_user_id: int, query, data: str) -> None:
-        guest_id = self._deps.adapter.resolve_guest_id(telegram_user_id=telegram_user_id)
+        guest_id = self._deps.identity.resolve_guest_id(telegram_user_id=telegram_user_id)
         if not guest_id:
             await self._deps.flow_guard.leave(telegram_user_id)
             await query.answer()
@@ -138,7 +138,7 @@ class AvailableOffersScenario:
         await query.answer()
 
     async def handle_available_offer_callback(self, telegram_user_id: int, query, data: str) -> None:
-        guest_id = self._deps.adapter.resolve_guest_id(telegram_user_id=telegram_user_id)
+        guest_id = self._deps.identity.resolve_guest_id(telegram_user_id=telegram_user_id)
         if not guest_id:
             await self._deps.flow_guard.leave(telegram_user_id)
             await query.answer()
@@ -166,7 +166,7 @@ class AvailableOffersScenario:
             return
 
         category_name = categories[category_idx]
-        _, rows = self._deps.adapter.get_category_matches(guest_id=guest_id, category_name=category_name)
+        _, rows = self._deps.available_offers.get_category_matches(guest_id=guest_id, category_name=category_name)
         periods = build_available_periods(rows=rows)
         if period_idx < 0 or period_idx >= len(periods):
             await query.answer()
@@ -178,7 +178,7 @@ class AvailableOffersScenario:
             await query.answer("Текст специального предложения не найден.", show_alert=False)
             return
 
-        offer_text = self._deps.adapter.get_offer_text(offer_id=row_with_offer.offer_id, offer_title=row_with_offer.offer_title)
+        offer_text = self._deps.available_offers.get_offer_text(offer_id=row_with_offer.offer_id, offer_title=row_with_offer.offer_title)
         if not offer_text:
             offer_text = "Текст специального предложения недоступен."
 
@@ -194,7 +194,7 @@ class AvailableOffersScenario:
             )
 
     async def handle_notified_category_callback(self, telegram_user_id: int, query, data: str) -> None:
-        guest_id = self._deps.adapter.resolve_guest_id(telegram_user_id=telegram_user_id)
+        guest_id = self._deps.identity.resolve_guest_id(telegram_user_id=telegram_user_id)
         if not guest_id:
             await query.answer()
             if query.message is not None:
@@ -207,13 +207,13 @@ class AvailableOffersScenario:
             await query.answer()
             return
 
-        categories = self._deps.adapter.get_available_categories(guest_id=guest_id)
+        categories = self._deps.available_offers.get_available_categories(guest_id=guest_id)
         if category_idx < 0 or category_idx >= len(categories):
             await query.answer()
             return
 
         category_name = categories[category_idx]
-        _, rows = self._deps.adapter.get_category_matches(guest_id=guest_id, category_name=category_name)
+        _, rows = self._deps.available_offers.get_category_matches(guest_id=guest_id, category_name=category_name)
         periods = build_available_periods(rows=rows)
 
         await query.answer()
@@ -231,7 +231,7 @@ class AvailableOffersScenario:
             )
 
     async def handle_notified_period_callback(self, telegram_user_id: int, query, data: str) -> None:
-        guest_id = self._deps.adapter.resolve_guest_id(telegram_user_id=telegram_user_id)
+        guest_id = self._deps.identity.resolve_guest_id(telegram_user_id=telegram_user_id)
         if not guest_id:
             await query.answer()
             if query.message is not None:
@@ -249,20 +249,20 @@ class AvailableOffersScenario:
             await query.answer()
             return
 
-        categories = self._deps.adapter.get_available_categories(guest_id=guest_id)
+        categories = self._deps.available_offers.get_available_categories(guest_id=guest_id)
         if category_idx < 0 or category_idx >= len(categories):
             await query.answer()
             return
 
         category_name = categories[category_idx]
-        _, rows = self._deps.adapter.get_category_matches(guest_id=guest_id, category_name=category_name)
+        _, rows = self._deps.available_offers.get_category_matches(guest_id=guest_id, category_name=category_name)
         periods = build_available_periods(rows=rows)
         if period_idx < 0 or period_idx >= len(periods):
             await query.answer()
             return
 
         period = periods[period_idx]
-        last_room_dates = self._deps.adapter.get_last_room_dates(
+        last_room_dates = self._deps.available_offers.get_last_room_dates(
             guest_id=guest_id,
             category_name=category_name,
             period_start=period.start,
@@ -283,7 +283,7 @@ class AvailableOffersScenario:
             )
 
     async def handle_notified_offer_callback(self, telegram_user_id: int, query, data: str) -> None:
-        guest_id = self._deps.adapter.resolve_guest_id(telegram_user_id=telegram_user_id)
+        guest_id = self._deps.identity.resolve_guest_id(telegram_user_id=telegram_user_id)
         if not guest_id:
             await query.answer()
             if query.message is not None:
@@ -301,13 +301,13 @@ class AvailableOffersScenario:
             await query.answer()
             return
 
-        categories = self._deps.adapter.get_available_categories(guest_id=guest_id)
+        categories = self._deps.available_offers.get_available_categories(guest_id=guest_id)
         if category_idx < 0 or category_idx >= len(categories):
             await query.answer()
             return
         category_name = categories[category_idx]
 
-        _, rows = self._deps.adapter.get_category_matches(guest_id=guest_id, category_name=category_name)
+        _, rows = self._deps.available_offers.get_category_matches(guest_id=guest_id, category_name=category_name)
         periods = build_available_periods(rows=rows)
         if period_idx < 0 or period_idx >= len(periods):
             await query.answer()
@@ -319,7 +319,7 @@ class AvailableOffersScenario:
             await query.answer("Текст специального предложения не найден.", show_alert=False)
             return
 
-        offer_text = self._deps.adapter.get_offer_text(offer_id=row_with_offer.offer_id, offer_title=row_with_offer.offer_title)
+        offer_text = self._deps.available_offers.get_offer_text(offer_id=row_with_offer.offer_id, offer_title=row_with_offer.offer_title)
         if not offer_text:
             offer_text = "Текст специального предложения недоступен."
 
@@ -336,7 +336,7 @@ class AvailableOffersScenario:
 
     async def handle_nav_back_available_categories(self, telegram_user_id: int, query) -> None:
         await query.answer()
-        guest_id = self._deps.adapter.resolve_guest_id(telegram_user_id=telegram_user_id)
+        guest_id = self._deps.identity.resolve_guest_id(telegram_user_id=telegram_user_id)
         if not guest_id:
             await self._deps.flow_guard.leave(telegram_user_id)
             if query.message is not None:
@@ -356,12 +356,12 @@ class AvailableOffersScenario:
 
     async def handle_nav_back_notified_categories(self, telegram_user_id: int, query) -> None:
         await query.answer()
-        guest_id = self._deps.adapter.resolve_guest_id(telegram_user_id=telegram_user_id)
+        guest_id = self._deps.identity.resolve_guest_id(telegram_user_id=telegram_user_id)
         if not guest_id:
             if query.message is not None:
                 await query.message.reply_text(msg("auth_required"), reply_markup=build_phone_request_keyboard())
             return
-        categories = self._deps.adapter.get_available_categories(guest_id=guest_id)
+        categories = self._deps.available_offers.get_available_categories(guest_id=guest_id)
         if query.message is not None:
             if not categories:
                 await query.edit_message_text(msg("available_none"), reply_markup=build_numeric_edit_keyboard())
@@ -423,7 +423,7 @@ class AvailableOffersScenario:
             return
 
         category_name = categories[category_idx]
-        _, rows = self._deps.adapter.get_category_matches(guest_id=guest_id, category_name=category_name)
+        _, rows = self._deps.available_offers.get_category_matches(guest_id=guest_id, category_name=category_name)
         periods = build_available_breakfast_periods(rows=rows)
         session = await self._deps.sessions.get(telegram_user_id)
         session.available_category_names = list(categories)
@@ -472,14 +472,14 @@ class AvailableOffersScenario:
         session = await self._deps.sessions.get(telegram_user_id)
         rows = session.available_category_rows or []
         if not rows:
-            _, rows = self._deps.adapter.get_category_matches(guest_id=guest_id, category_name=category_name)
+            _, rows = self._deps.available_offers.get_category_matches(guest_id=guest_id, category_name=category_name)
         periods = build_available_periods(rows=rows)
         if period_idx < 0 or period_idx >= len(periods):
             await query.answer()
             return
 
         period = periods[period_idx]
-        last_room_dates = self._deps.adapter.get_last_room_dates(
+        last_room_dates = self._deps.available_offers.get_last_room_dates(
             guest_id=guest_id,
             category_name=category_name,
             period_start=period.start,
@@ -501,7 +501,7 @@ class AvailableOffersScenario:
             )
 
     def _available_groups_for_guest(self, *, guest_id: str):
-        category_groups = self._deps.adapter.get_available_categories_with_groups(guest_id=guest_id)
+        category_groups = self._deps.available_offers.get_available_categories_with_groups(guest_id=guest_id)
         return build_available_groups(category_groups=category_groups)
 
 
@@ -517,3 +517,5 @@ def _parse_three_indices(first: str, second: str, third: str) -> tuple[int, int,
         return int(first), int(second), int(third)
     except ValueError:
         return None
+
+

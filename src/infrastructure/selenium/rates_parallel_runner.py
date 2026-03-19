@@ -8,7 +8,6 @@ from time import perf_counter
 from types import TracebackType
 
 from src.domain.entities.rate import DailyRate
-from src.infrastructure.loaders.category_rules_loader import load_category_rules
 from src.infrastructure.selenium.browser import build_chrome_options
 from src.infrastructure.selenium.hotel_rates_gateway import SeleniumHotelRatesGateway
 from src.infrastructure.selenium.rates_transform import map_scraped_rates_to_domain
@@ -16,7 +15,7 @@ from src.infrastructure.selenium.rates_transform import map_scraped_rates_to_dom
 
 @dataclass(frozen=True, slots=True)
 class RatesParallelRunConfig:
-    category_rules_csv_path: str
+    category_to_group: dict[str, str]
     adults_counts: tuple[int, ...]
     days_to_collect: int = 3
     headless: bool = True
@@ -41,6 +40,8 @@ def build_stay_dates(start_date: date, days_to_collect: int) -> list[date]:
 
 class SeleniumRatesParallelRunner:
     def __init__(self, config: RatesParallelRunConfig):
+        if not config.category_to_group:
+            raise ValueError("category_to_group must not be empty; seed category_rules in Postgres first")
         if not config.adults_counts:
             raise ValueError("adults_counts must not be empty")
         for adults in config.adults_counts:
@@ -58,7 +59,6 @@ class SeleniumRatesParallelRunner:
                 "Selenium is required for parallel rates runner. Install `selenium` and ChromeDriver."
             ) from exc
 
-        category_to_group, _, _ = load_category_rules(self._config.category_rules_csv_path)
         stay_dates = build_stay_dates(start_date, self._config.days_to_collect)
         out: list[DailyRate] = []
         outcomes: list[ParserRunOutcome] = []
@@ -68,7 +68,7 @@ class SeleniumRatesParallelRunner:
                 pool.submit(
                     self._run_single_parser,
                     webdriver=webdriver,
-                    category_to_group=category_to_group,
+                    category_to_group=self._config.category_to_group,
                     adults_count=adults_count,
                     stay_dates=stay_dates,
                 ): adults_count
@@ -171,7 +171,7 @@ class SeleniumRatesParallelRunner:
                         parsed.extend(
                             map_scraped_rates_to_domain(
                                 scraped,
-                                category_to_group=category_to_group,
+                                category_to_group=self._config.category_to_group,
                                 adults_counts=[adults_count],
                             )
                         )

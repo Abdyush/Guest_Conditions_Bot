@@ -38,7 +38,7 @@ class PeriodQuotesScenario:
         self._deps = deps
 
     async def open_group_picker(self, *, telegram_user_id: int, message) -> None:
-        guest_id = self._deps.adapter.resolve_guest_id(telegram_user_id=telegram_user_id)
+        guest_id = self._deps.identity.resolve_guest_id(telegram_user_id=telegram_user_id)
         if not guest_id:
             await self._deps.flow_guard.leave(telegram_user_id)
             await self._deps.sessions.set_state(telegram_user_id, ConversationState.AWAIT_PHONE_CONTACT)
@@ -74,7 +74,7 @@ class PeriodQuotesScenario:
         return True
 
     async def handle_quotes_group_callback(self, telegram_user_id: int, query, data: str) -> None:
-        guest_id = self._deps.adapter.resolve_guest_id(telegram_user_id=telegram_user_id)
+        guest_id = self._deps.identity.resolve_guest_id(telegram_user_id=telegram_user_id)
         if not guest_id:
             await self._deps.flow_guard.leave(telegram_user_id)
             await self._deps.sessions.set_state(telegram_user_id, ConversationState.AWAIT_PHONE_CONTACT)
@@ -180,7 +180,7 @@ class PeriodQuotesScenario:
             )
 
     async def handle_quotes_category_callback(self, telegram_user_id: int, query, data: str) -> None:
-        guest_id = self._deps.adapter.resolve_guest_id(telegram_user_id=telegram_user_id)
+        guest_id = self._deps.identity.resolve_guest_id(telegram_user_id=telegram_user_id)
         if not guest_id:
             await self._deps.flow_guard.leave(telegram_user_id)
             await query.answer()
@@ -208,7 +208,7 @@ class PeriodQuotesScenario:
         )
 
     async def handle_quotes_offer_callback(self, telegram_user_id: int, query, data: str) -> None:
-        guest_id = self._deps.adapter.resolve_guest_id(telegram_user_id=telegram_user_id)
+        guest_id = self._deps.identity.resolve_guest_id(telegram_user_id=telegram_user_id)
         if not guest_id:
             await self._deps.flow_guard.leave(telegram_user_id)
             await query.answer()
@@ -240,7 +240,7 @@ class PeriodQuotesScenario:
             await query.answer("Текст специального предложения не найден.", show_alert=False)
             return
 
-        offer_text = self._deps.adapter.get_offer_text(
+        offer_text = self._deps.period_quotes.get_offer_text(
             offer_id=row_with_offer.offer_id,
             offer_title=row_with_offer.offer_title,
         )
@@ -258,7 +258,7 @@ class PeriodQuotesScenario:
             )
 
     async def handle_quotes_result_callback(self, telegram_user_id: int, query, data: str) -> None:
-        guest_id = self._deps.adapter.resolve_guest_id(telegram_user_id=telegram_user_id)
+        guest_id = self._deps.identity.resolve_guest_id(telegram_user_id=telegram_user_id)
         if not guest_id:
             await self._deps.flow_guard.leave(telegram_user_id)
             await query.answer()
@@ -358,7 +358,7 @@ class PeriodQuotesScenario:
         period_start: date,
         period_end: date,
     ) -> None:
-        guest_id = self._deps.adapter.resolve_guest_id(telegram_user_id=telegram_user_id)
+        guest_id = self._deps.identity.resolve_guest_id(telegram_user_id=telegram_user_id)
         if not guest_id:
             await self._deps.flow_guard.leave(telegram_user_id)
             await self._deps.sessions.set_state(telegram_user_id, ConversationState.AWAIT_PHONE_CONTACT)
@@ -367,7 +367,7 @@ class PeriodQuotesScenario:
             return
 
         try:
-            run_id, quotes = self._deps.adapter.get_period_quotes(
+            run_id, quotes = self._deps.period_quotes.get_period_quotes(
                 guest_id=guest_id,
                 period_start=period_start,
                 period_end=period_end,
@@ -376,7 +376,7 @@ class PeriodQuotesScenario:
             last_room_dates_by_category: dict[str, list[date]] = {}
             for category_name in {item.category_name for item in quotes}:
                 tariffs = {item.tariff for item in quotes if item.category_name == category_name}
-                last_room_dates_by_category[category_name] = self._deps.adapter.get_last_room_dates(
+                last_room_dates_by_category[category_name] = self._deps.period_quotes.get_last_room_dates(
                     guest_id=guest_id,
                     category_name=category_name,
                     period_start=period_start,
@@ -455,3 +455,5 @@ class PeriodQuotesScenario:
                     has_offer_text=has_offer_text,
                 ),
             )
+
+

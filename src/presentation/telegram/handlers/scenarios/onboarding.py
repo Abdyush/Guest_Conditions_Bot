@@ -35,7 +35,7 @@ class OnboardingScenario:
             return
         try:
             logger.info("telegram_update type=start user_id=%s", user.id)
-            guest_id = self._deps.adapter.resolve_guest_id(telegram_user_id=user.id)
+            guest_id = self._deps.identity.resolve_guest_id(telegram_user_id=user.id)
             if guest_id:
                 await self._deps.sessions.reset(user.id)
                 await send_main_menu_for_guest(deps=self._deps, message=message, guest_id=guest_id)
@@ -54,7 +54,7 @@ class OnboardingScenario:
         if user is None or message is None:
             return
         try:
-            self._deps.adapter.unbind_telegram(telegram_user_id=user.id)
+            self._deps.identity.unbind_telegram(telegram_user_id=user.id)
             await self._deps.sessions.reset(user.id)
             await message.reply_text(msg("unlink_done"), reply_markup=build_phone_request_keyboard())
         finally:
@@ -72,7 +72,7 @@ class OnboardingScenario:
             await self._deps.sessions.persist(user.id)
             return
 
-        guest_id = self._deps.adapter.bind_by_phone(telegram_user_id=user.id, phone=message.contact.phone_number)
+        guest_id = self._deps.identity.bind_by_phone(telegram_user_id=user.id, phone=message.contact.phone_number)
         if guest_id:
             await self._deps.sessions.reset(user.id)
             await send_main_menu_for_guest(deps=self._deps, message=message, guest_id=guest_id)
@@ -90,3 +90,4 @@ class OnboardingScenario:
         await message.reply_text(render_registration_intro())
         await message.reply_text(render_adults_prompt(), reply_markup=build_registration_numeric_keyboard())
         await self._deps.sessions.persist(user.id)
+

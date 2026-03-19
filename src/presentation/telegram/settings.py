@@ -9,6 +9,16 @@ class TelegramSettings:
     admin_telegram_id: int | None
 
 
+@dataclass(frozen=True, slots=True)
+class TelegramRuntimeSettings:
+    bot_token: str
+    admin_telegram_id: int | None
+    redis_url: str
+    selenium_headless: bool
+    selenium_wait_seconds: int
+    timezone_name: str
+
+
 def load_telegram_settings() -> TelegramSettings:
     raw_admin_id = os.getenv("ADMIN_TELEGRAM_ID", "").strip()
     admin_telegram_id: int | None = None
@@ -18,3 +28,27 @@ def load_telegram_settings() -> TelegramSettings:
         except ValueError:
             admin_telegram_id = None
     return TelegramSettings(admin_telegram_id=admin_telegram_id)
+
+
+def load_telegram_runtime_settings() -> TelegramRuntimeSettings:
+    telegram_settings = load_telegram_settings()
+    token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+    if not token:
+        raise ValueError("TELEGRAM_BOT_TOKEN is required")
+
+    redis_url = os.getenv("REDIS_URL", "").strip()
+    if not redis_url:
+        raise ValueError("REDIS_URL is required for aiogram Redis FSM storage")
+
+    selenium_headless = os.getenv("SELENIUM_VISIBLE", "").strip().lower() not in {"1", "true", "yes"}
+    selenium_wait_seconds = int(os.getenv("SELENIUM_WAIT_SECONDS", "20"))
+    timezone_name = os.getenv("BOT_TIMEZONE", "Europe/Moscow")
+
+    return TelegramRuntimeSettings(
+        bot_token=token,
+        admin_telegram_id=telegram_settings.admin_telegram_id,
+        redis_url=redis_url,
+        selenium_headless=selenium_headless,
+        selenium_wait_seconds=selenium_wait_seconds,
+        timezone_name=timezone_name,
+    )
