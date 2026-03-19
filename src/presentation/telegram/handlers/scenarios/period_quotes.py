@@ -297,6 +297,10 @@ class PeriodQuotesScenario:
         if draft is None or draft.month_cursor is None:
             return
         session.state = ConversationState.AWAIT_QUOTES_CALENDAR
+        if draft.checkin is not None:
+            draft.month_cursor = draft.checkin.replace(day=1)
+        draft.checkin = None
+        draft.checkout = None
         if query.message is not None:
             await query.edit_message_text(
                 text=render_period_quotes_calendar_prompt(),
@@ -327,6 +331,10 @@ class PeriodQuotesScenario:
             draft = session.period_quotes
             if draft is not None and draft.month_cursor is not None:
                 session.state = ConversationState.AWAIT_QUOTES_CALENDAR
+                if draft.checkin is not None:
+                    draft.month_cursor = draft.checkin.replace(day=1)
+                draft.checkin = None
+                draft.checkout = None
                 await message.reply_text(
                     render_period_quotes_calendar_prompt(),
                     reply_markup=build_period_quotes_calendar_inline_keyboard(
@@ -455,5 +463,3 @@ class PeriodQuotesScenario:
                     has_offer_text=has_offer_text,
                 ),
             )
-
-
