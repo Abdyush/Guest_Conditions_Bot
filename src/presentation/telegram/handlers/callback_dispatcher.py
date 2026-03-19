@@ -18,6 +18,10 @@ from src.presentation.telegram.callbacks.data_parser import (
     PREFIX_AVAILABLE_PERIOD,
     PREFIX_BEST_CATEGORY,
     PREFIX_BEST_GROUP,
+    PREFIX_EDIT_BANK,
+    PREFIX_EDIT_FIELD,
+    PREFIX_EDIT_LOYALTY,
+    PREFIX_EDIT_NAV,
     PREFIX_BEST_OFFER,
     PREFIX_BEST_RESULT,
     PREFIX_CALENDAR,
@@ -208,6 +212,38 @@ class TelegramCallbackDispatcher:
                 await query.answer()
                 return True
             await self._scenarios.available_offers.handle_available_offer_callback(user_id, query, data)
+            return True
+        if data.startswith(PREFIX_EDIT_FIELD):
+            if session_state != ConversationState.EDIT_MENU:
+                await query.answer()
+                return True
+            await self._scenarios.registration.handle_edit_field_callback(user_id, query, data)
+            return True
+        if data.startswith(PREFIX_EDIT_LOYALTY):
+            if session_state != ConversationState.EDIT_LOYALTY:
+                await query.answer()
+                return True
+            await self._scenarios.registration.handle_edit_loyalty_callback(user_id, query, data)
+            return True
+        if data.startswith(PREFIX_EDIT_BANK):
+            if session_state != ConversationState.EDIT_BANK:
+                await query.answer()
+                return True
+            await self._scenarios.registration.handle_edit_bank_callback(user_id, query, data)
+            return True
+        if data.startswith(PREFIX_EDIT_NAV):
+            if session_state not in {
+                ConversationState.EDIT_ADULTS,
+                ConversationState.EDIT_CHILDREN_4_13,
+                ConversationState.EDIT_INFANTS_0_3,
+                ConversationState.EDIT_GROUPS,
+                ConversationState.EDIT_LOYALTY,
+                ConversationState.EDIT_BANK,
+                ConversationState.EDIT_DESIRED_PRICE,
+            }:
+                await query.answer()
+                return True
+            await self._scenarios.registration.handle_edit_navigation_callback(user_id, query, data)
             return True
         if data.startswith(PREFIX_REGISTRATION_CATEGORY):
             if active_flow != ActiveFlow.REGISTRATION and session_state != ConversationState.EDIT_GROUPS:

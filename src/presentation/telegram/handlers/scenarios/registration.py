@@ -3,24 +3,26 @@ from __future__ import annotations
 import logging
 from decimal import Decimal
 
+from src.presentation.telegram.callbacks.data_parser import (
+    PREFIX_EDIT_BANK,
+    PREFIX_EDIT_FIELD,
+    PREFIX_EDIT_LOYALTY,
+    PREFIX_EDIT_NAV,
+)
 from src.presentation.telegram.handlers.dependencies import TelegramHandlersDependencies
 from src.presentation.telegram.handlers.shared.navigation import send_main_menu_for_guest
+from src.presentation.telegram.keyboards.edit_profile import (
+    build_edit_bank_inline_keyboard,
+    build_edit_categories_inline_keyboard,
+    build_edit_loyalty_inline_keyboard,
+    build_edit_menu_inline_keyboard,
+    build_edit_numeric_inline_keyboard,
+    build_edit_profile_reply_keyboard,
+)
 from src.presentation.telegram.keyboards.main_menu import (
     AVAILABLE_ROOMS_BUTTON,
     BEST_PERIOD_BUTTON,
-    EDIT_ADULTS_BUTTON,
     EDIT_DATA_BUTTON,
-    EDIT_BANK_BUTTON,
-    EDIT_CHILDREN_BUTTON,
-    EDIT_GROUPS_BUTTON,
-    EDIT_INFANTS_BUTTON,
-    EDIT_LOYALTY_BUTTON,
-    EDIT_PRICE_BUTTON,
-    build_bank_keyboard,
-    build_categories_inline_keyboard,
-    build_edit_menu_keyboard,
-    build_loyalty_keyboard,
-    build_numeric_edit_keyboard,
     PERIOD_QUOTES_BUTTON,
     build_phone_request_keyboard,
 )
@@ -159,6 +161,17 @@ class RegistrationScenario:
             reg.desired_price_rub = desired_price
             await self._finish_registration(telegram_user_id, reg, message)
 
+    async def open_edit_menu(self, telegram_user_id: int, message) -> None:
+        session = await self._deps.sessions.get(telegram_user_id)
+        guest_id = self._deps.identity.resolve_guest_id(telegram_user_id=telegram_user_id)
+        if not guest_id:
+            session.state = ConversationState.AWAIT_PHONE_CONTACT
+            await message.reply_text(msg("auth_required"), reply_markup=build_phone_request_keyboard())
+            return
+        session.state = ConversationState.EDIT_MENU
+        await message.reply_text(reply_markup=build_edit_profile_reply_keyboard(), text=msg("edit_pick_field"))
+        await message.reply_text(msg("edit_pick_field"), reply_markup=build_edit_menu_inline_keyboard())
+
     async def handle_edit_step(self, telegram_user_id: int, text: str, message) -> None:
         session = await self._deps.sessions.get(telegram_user_id)
         guest_id = self._deps.identity.resolve_guest_id(telegram_user_id=telegram_user_id)
@@ -168,84 +181,179 @@ class RegistrationScenario:
             return
 
         if session.state == ConversationState.EDIT_MENU:
-            if text == EDIT_ADULTS_BUTTON:
-                session.state = ConversationState.EDIT_ADULTS
-                await message.reply_text(msg("reg_step_2"), reply_markup=build_numeric_edit_keyboard())
-                return
-            if text == EDIT_CHILDREN_BUTTON:
-                session.state = ConversationState.EDIT_CHILDREN_4_13
-                await message.reply_text(msg("reg_step_3"), reply_markup=build_numeric_edit_keyboard())
-                return
-            if text == EDIT_INFANTS_BUTTON:
-                session.state = ConversationState.EDIT_INFANTS_0_3
-                await message.reply_text(msg("reg_step_4"), reply_markup=build_numeric_edit_keyboard())
-                return
-            if text == EDIT_GROUPS_BUTTON:
-                session.state = ConversationState.EDIT_GROUPS
-                profile = self._deps.profile.get_guest_profile(guest_id=guest_id)
-                selected = profile.effective_allowed_groups if profile and profile.effective_allowed_groups else set()
-                session.registration = RegistrationDraft(allowed_groups=set(selected))
-                await message.reply_text(msg("reg_step_5"), reply_markup=build_categories_inline_keyboard(selected_codes=set(selected)))
-                return
-            if text == EDIT_LOYALTY_BUTTON:
-                session.state = ConversationState.EDIT_LOYALTY
-                await message.reply_text(msg("reg_step_6"), reply_markup=build_loyalty_keyboard())
-                return
-            if text == EDIT_BANK_BUTTON:
-                session.state = ConversationState.EDIT_BANK
-                await message.reply_text(msg("reg_step_7"), reply_markup=build_bank_keyboard())
-                return
-            if text == EDIT_PRICE_BUTTON:
-                session.state = ConversationState.EDIT_DESIRED_PRICE
-                await message.reply_text(msg("reg_step_8"), reply_markup=build_numeric_edit_keyboard())
-                return
-            await message.reply_text(msg("edit_pick_field"), reply_markup=build_edit_menu_keyboard())
+            await message.reply_text(msg("edit_pick_field"), reply_markup=build_edit_menu_inline_keyboard())
             return
 
         try:
             if session.state == ConversationState.EDIT_ADULTS:
                 v = parse_int(text)
                 if v is None or v < 1:
-                    await message.reply_text(msg("reg_adults_invalid"), reply_markup=build_numeric_edit_keyboard())
+                    await message.reply_text(msg("reg_adults_invalid"), reply_markup=build_edit_numeric_inline_keyboard())
                     return
                 self._deps.profile.update_guest_profile(guest_id=guest_id, adults=v)
             elif session.state == ConversationState.EDIT_CHILDREN_4_13:
                 v = parse_int(text)
                 if v is None or v < 0:
-                    await message.reply_text(msg("reg_children_invalid"), reply_markup=build_numeric_edit_keyboard())
+                    await message.reply_text(msg("reg_children_invalid"), reply_markup=build_edit_numeric_inline_keyboard())
                     return
                 self._deps.profile.update_guest_profile(guest_id=guest_id, children_4_13=v)
             elif session.state == ConversationState.EDIT_INFANTS_0_3:
                 v = parse_int(text)
                 if v is None or v < 0:
-                    await message.reply_text(msg("reg_infants_invalid"), reply_markup=build_numeric_edit_keyboard())
+                    await message.reply_text(msg("reg_infants_invalid"), reply_markup=build_edit_numeric_inline_keyboard())
                     return
                 self._deps.profile.update_guest_profile(guest_id=guest_id, infants_0_3=v)
             elif session.state == ConversationState.EDIT_LOYALTY:
-                if text not in LOYALTY_OPTIONS:
-                    await message.reply_text(msg("reg_loyalty_invalid"), reply_markup=build_loyalty_keyboard())
-                    return
-                self._deps.profile.update_guest_profile(guest_id=guest_id, loyalty_status=text, bank_status="")
+                await message.reply_text(msg("reg_loyalty_invalid"), reply_markup=build_edit_loyalty_inline_keyboard())
+                return
             elif session.state == ConversationState.EDIT_BANK:
-                if text not in BANK_LABEL_TO_CODE:
-                    await message.reply_text(msg("reg_bank_invalid"), reply_markup=build_bank_keyboard())
-                    return
-                self._deps.profile.update_guest_profile(guest_id=guest_id, bank_status=BANK_LABEL_TO_CODE[text])
+                await message.reply_text(msg("reg_bank_invalid"), reply_markup=build_edit_bank_inline_keyboard())
+                return
             elif session.state == ConversationState.EDIT_DESIRED_PRICE:
                 v = parse_decimal(text)
                 if v is None or v <= 0:
-                    await message.reply_text(msg("reg_price_invalid"), reply_markup=build_numeric_edit_keyboard())
+                    await message.reply_text(msg("reg_price_invalid"), reply_markup=build_edit_numeric_inline_keyboard())
                     return
                 self._deps.profile.update_guest_profile(guest_id=guest_id, desired_price_rub=v)
             else:
                 return
         except Exception:
             logger.exception("edit_failed user_id=%s guest_id=%s", telegram_user_id, guest_id)
-            await message.reply_text(msg("registration_failed"), reply_markup=build_edit_menu_keyboard())
+            await message.reply_text(msg("registration_failed"), reply_markup=build_edit_profile_reply_keyboard())
+            await message.reply_text(msg("edit_pick_field"), reply_markup=build_edit_menu_inline_keyboard())
             return
 
         session.state = ConversationState.EDIT_MENU
-        await message.reply_text(msg("edit_saved"), reply_markup=build_edit_menu_keyboard())
+        await message.reply_text(msg("edit_saved"), reply_markup=build_edit_profile_reply_keyboard())
+        await message.reply_text(msg("edit_pick_field"), reply_markup=build_edit_menu_inline_keyboard())
+
+    async def handle_edit_field_callback(self, telegram_user_id: int, query, data: str) -> None:
+        session = await self._deps.sessions.get(telegram_user_id)
+        guest_id = self._deps.identity.resolve_guest_id(telegram_user_id=telegram_user_id)
+        if not guest_id:
+            session.state = ConversationState.AWAIT_PHONE_CONTACT
+            await query.answer()
+            if query.message is not None:
+                await query.message.reply_text(msg("auth_required"), reply_markup=build_phone_request_keyboard())
+            return
+
+        action = data.removeprefix(PREFIX_EDIT_FIELD)
+        if action == "back":
+            await query.answer()
+            if query.message is not None:
+                await self._deps.sessions.reset(telegram_user_id)
+                await send_main_menu_for_guest(deps=self._deps, message=query.message, guest_id=guest_id)
+            return
+
+        if action == "adults":
+            session.state = ConversationState.EDIT_ADULTS
+            prompt = msg("reg_step_2")
+            markup = build_edit_numeric_inline_keyboard()
+        elif action == "children":
+            session.state = ConversationState.EDIT_CHILDREN_4_13
+            prompt = msg("reg_step_3")
+            markup = build_edit_numeric_inline_keyboard()
+        elif action == "infants":
+            session.state = ConversationState.EDIT_INFANTS_0_3
+            prompt = msg("reg_step_4")
+            markup = build_edit_numeric_inline_keyboard()
+        elif action == "groups":
+            session.state = ConversationState.EDIT_GROUPS
+            profile = self._deps.profile.get_guest_profile(guest_id=guest_id)
+            selected = profile.effective_allowed_groups if profile and profile.effective_allowed_groups else set()
+            session.registration = RegistrationDraft(allowed_groups=set(selected))
+            prompt = msg("reg_step_5")
+            markup = build_edit_categories_inline_keyboard(selected_codes=set(selected))
+        elif action == "loyalty":
+            session.state = ConversationState.EDIT_LOYALTY
+            prompt = msg("reg_step_6")
+            markup = build_edit_loyalty_inline_keyboard()
+        elif action == "bank":
+            session.state = ConversationState.EDIT_BANK
+            prompt = msg("reg_step_7")
+            markup = build_edit_bank_inline_keyboard()
+        elif action == "price":
+            session.state = ConversationState.EDIT_DESIRED_PRICE
+            prompt = msg("reg_step_8")
+            markup = build_edit_numeric_inline_keyboard()
+        else:
+            await query.answer()
+            return
+
+        await query.answer()
+        if query.message is not None:
+            await query.edit_message_text(prompt, reply_markup=markup)
+
+    async def handle_edit_loyalty_callback(self, telegram_user_id: int, query, data: str) -> None:
+        session = await self._deps.sessions.get(telegram_user_id)
+        guest_id = self._deps.identity.resolve_guest_id(telegram_user_id=telegram_user_id)
+        if not guest_id:
+            session.state = ConversationState.AWAIT_PHONE_CONTACT
+            await query.answer()
+            if query.message is not None:
+                await query.message.reply_text(msg("auth_required"), reply_markup=build_phone_request_keyboard())
+            return
+
+        value = data.removeprefix(PREFIX_EDIT_LOYALTY)
+        if value not in LOYALTY_OPTIONS:
+            await query.answer()
+            return
+
+        try:
+            self._deps.profile.update_guest_profile(guest_id=guest_id, loyalty_status=value, bank_status="")
+        except Exception:
+            logger.exception("edit_failed user_id=%s guest_id=%s", telegram_user_id, guest_id)
+            await query.answer()
+            if query.message is not None:
+                await query.message.reply_text(msg("registration_failed"), reply_markup=build_edit_profile_reply_keyboard())
+                await query.message.reply_text(msg("edit_pick_field"), reply_markup=build_edit_menu_inline_keyboard())
+            return
+        session.state = ConversationState.EDIT_MENU
+        await query.answer(msg("edit_saved"), show_alert=False)
+        if query.message is not None:
+            await query.edit_message_text(msg("edit_pick_field"), reply_markup=build_edit_menu_inline_keyboard())
+
+    async def handle_edit_bank_callback(self, telegram_user_id: int, query, data: str) -> None:
+        session = await self._deps.sessions.get(telegram_user_id)
+        guest_id = self._deps.identity.resolve_guest_id(telegram_user_id=telegram_user_id)
+        if not guest_id:
+            session.state = ConversationState.AWAIT_PHONE_CONTACT
+            await query.answer()
+            if query.message is not None:
+                await query.message.reply_text(msg("auth_required"), reply_markup=build_phone_request_keyboard())
+            return
+
+        value = data.removeprefix(PREFIX_EDIT_BANK)
+        if value != "none" and value not in BANK_LABEL_TO_CODE.values():
+            await query.answer()
+            return
+
+        try:
+            self._deps.profile.update_guest_profile(
+                guest_id=guest_id,
+                bank_status="" if value == "none" else value,
+            )
+        except Exception:
+            logger.exception("edit_failed user_id=%s guest_id=%s", telegram_user_id, guest_id)
+            await query.answer()
+            if query.message is not None:
+                await query.message.reply_text(msg("registration_failed"), reply_markup=build_edit_profile_reply_keyboard())
+                await query.message.reply_text(msg("edit_pick_field"), reply_markup=build_edit_menu_inline_keyboard())
+            return
+        session.state = ConversationState.EDIT_MENU
+        await query.answer(msg("edit_saved"), show_alert=False)
+        if query.message is not None:
+            await query.edit_message_text(msg("edit_pick_field"), reply_markup=build_edit_menu_inline_keyboard())
+
+    async def handle_edit_navigation_callback(self, telegram_user_id: int, query, data: str) -> None:
+        session = await self._deps.sessions.get(telegram_user_id)
+        if data != f"{PREFIX_EDIT_NAV}back":
+            await query.answer()
+            return
+        session.state = ConversationState.EDIT_MENU
+        await query.answer()
+        if query.message is not None:
+            await query.edit_message_text(msg("edit_pick_field"), reply_markup=build_edit_menu_inline_keyboard())
 
     async def handle_categories_callback(self, telegram_user_id: int, query, data: str) -> None:
         session = await self._deps.sessions.get(telegram_user_id)
@@ -268,8 +376,8 @@ class RegistrationScenario:
                     await query.answer(msg("reg_select_at_least_one"), show_alert=False)
                 return
 
-            await query.answer()
             if session.state == ConversationState.AWAIT_REG_GROUPS:
+                await query.answer()
                 session.state = ConversationState.AWAIT_REG_LOYALTY
                 if query.message is not None:
                     await query.message.reply_text(render_loyalty_prompt(), reply_markup=build_registration_loyalty_keyboard())
@@ -278,8 +386,9 @@ class RegistrationScenario:
                 if guest_id:
                     self._deps.profile.update_guest_profile(guest_id=guest_id, allowed_groups=set(selected))
                 session.state = ConversationState.EDIT_MENU
+                await query.answer(msg("edit_saved"), show_alert=False)
                 if query.message is not None:
-                    await query.message.reply_text(msg("edit_saved"), reply_markup=build_edit_menu_keyboard())
+                    await query.edit_message_text(msg("edit_pick_field"), reply_markup=build_edit_menu_inline_keyboard())
             return
 
         if action == "all" and session.state == ConversationState.AWAIT_REG_GROUPS:
@@ -313,7 +422,7 @@ class RegistrationScenario:
             )
             return
 
-        await query.edit_message_reply_markup(reply_markup=build_categories_inline_keyboard(selected_codes=reg.allowed_groups))
+        await query.edit_message_reply_markup(reply_markup=build_edit_categories_inline_keyboard(selected_codes=reg.allowed_groups))
 
     async def handle_back(self, telegram_user_id: int, message, guest_id: str | None) -> bool:
         session = await self._deps.sessions.get(telegram_user_id)
@@ -363,7 +472,7 @@ class RegistrationScenario:
             ConversationState.EDIT_DESIRED_PRICE,
         }:
             session.state = ConversationState.EDIT_MENU
-            await message.reply_text(msg("edit_pick_field"), reply_markup=build_edit_menu_keyboard())
+            await message.reply_text(msg("edit_pick_field"), reply_markup=build_edit_menu_inline_keyboard())
             return True
 
         if session.state == ConversationState.EDIT_MENU and guest_id:

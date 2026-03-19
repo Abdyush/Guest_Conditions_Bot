@@ -14,7 +14,6 @@ from src.presentation.telegram.keyboards.main_menu import (
     MAIN_MENU_BUTTON,
     PERIOD_QUOTES_BUTTON,
     SCENARIO_BACK_BUTTON,
-    build_edit_menu_keyboard,
     build_main_menu_keyboard,
     build_phone_request_keyboard,
 )
@@ -78,8 +77,7 @@ class TelegramTextRouter:
             return
 
         if text == EDIT_DATA_BUTTON:
-            session.state = ConversationState.EDIT_MENU
-            await message.reply_text(msg("edit_pick_field"), reply_markup=build_edit_menu_keyboard())
+            await self._scenarios.registration.open_edit_menu(user_id, message)
             return
 
         if text == AVAILABLE_ROOMS_BUTTON:
