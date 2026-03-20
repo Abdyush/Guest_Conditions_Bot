@@ -1,7 +1,23 @@
 from __future__ import annotations
 
-from telegram import KeyboardButton, ReplyKeyboardMarkup
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
 
+from src.presentation.telegram.callbacks.data_parser import (
+    ADMIN_OPEN_REPORTS,
+    ADMIN_OPEN_STATISTICS,
+    ADMIN_OPEN_SYSTEM,
+    ADMIN_REPORT_PARSER_OFFERS,
+    ADMIN_REPORT_PARSER_RATES,
+    ADMIN_REPORT_RECALCULATION,
+    ADMIN_REPORT_USER_ERRORS,
+    ADMIN_STAT_BLOCKED,
+    ADMIN_STAT_NEW_USERS,
+    ADMIN_STAT_PRICE_TABLE,
+    ADMIN_STAT_TOTAL_USERS,
+    ADMIN_SYSTEM_OFFERS,
+    ADMIN_SYSTEM_RATES,
+    ADMIN_SYSTEM_RECALC,
+)
 from src.presentation.telegram.keyboards.main_menu import MAIN_MENU_BUTTON
 
 
@@ -27,9 +43,6 @@ ADMIN_STATS_BLOCKED_BUTTON = "Сколько заблокировало бота
 def build_admin_main_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text=ADMIN_SYSTEM_BUTTON)],
-            [KeyboardButton(text=ADMIN_REPORTS_BUTTON)],
-            [KeyboardButton(text=ADMIN_STATISTICS_BUTTON)],
             [KeyboardButton(text=MAIN_MENU_BUTTON)],
         ],
         resize_keyboard=True,
@@ -39,9 +52,6 @@ def build_admin_main_keyboard() -> ReplyKeyboardMarkup:
 def build_admin_system_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text=ADMIN_RUN_RATES_BUTTON)],
-            [KeyboardButton(text=ADMIN_RUN_OFFERS_BUTTON)],
-            [KeyboardButton(text=ADMIN_RUN_RECALC_BUTTON)],
             [KeyboardButton(text=ADMIN_BACK_BUTTON)],
             [KeyboardButton(text=MAIN_MENU_BUTTON)],
         ],
@@ -52,10 +62,6 @@ def build_admin_system_keyboard() -> ReplyKeyboardMarkup:
 def build_admin_reports_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text=ADMIN_REPORT_RATES_BUTTON)],
-            [KeyboardButton(text=ADMIN_REPORT_OFFERS_BUTTON)],
-            [KeyboardButton(text=ADMIN_REPORT_RECALC_BUTTON)],
-            [KeyboardButton(text=ADMIN_REPORT_ERRORS_BUTTON)],
             [KeyboardButton(text=ADMIN_BACK_BUTTON)],
             [KeyboardButton(text=MAIN_MENU_BUTTON)],
         ],
@@ -66,12 +72,50 @@ def build_admin_reports_keyboard() -> ReplyKeyboardMarkup:
 def build_admin_statistics_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text=ADMIN_STATS_TOTAL_USERS_BUTTON)],
-            [KeyboardButton(text=ADMIN_STATS_PRICE_TABLE_BUTTON)],
-            [KeyboardButton(text=ADMIN_STATS_NEW_USERS_BUTTON)],
-            [KeyboardButton(text=ADMIN_STATS_BLOCKED_BUTTON)],
             [KeyboardButton(text=ADMIN_BACK_BUTTON)],
             [KeyboardButton(text=MAIN_MENU_BUTTON)],
         ],
         resize_keyboard=True,
+    )
+
+
+def build_admin_main_inline_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton(text=ADMIN_SYSTEM_BUTTON, callback_data=ADMIN_OPEN_SYSTEM)],
+            [InlineKeyboardButton(text=ADMIN_REPORTS_BUTTON, callback_data=ADMIN_OPEN_REPORTS)],
+            [InlineKeyboardButton(text=ADMIN_STATISTICS_BUTTON, callback_data=ADMIN_OPEN_STATISTICS)],
+        ]
+    )
+
+
+def build_admin_system_inline_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton(text=ADMIN_RUN_RATES_BUTTON, callback_data=ADMIN_SYSTEM_RATES)],
+            [InlineKeyboardButton(text=ADMIN_RUN_OFFERS_BUTTON, callback_data=ADMIN_SYSTEM_OFFERS)],
+            [InlineKeyboardButton(text=ADMIN_RUN_RECALC_BUTTON, callback_data=ADMIN_SYSTEM_RECALC)],
+        ]
+    )
+
+
+def build_admin_reports_inline_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton(text=ADMIN_REPORT_RATES_BUTTON, callback_data=ADMIN_REPORT_PARSER_RATES)],
+            [InlineKeyboardButton(text=ADMIN_REPORT_OFFERS_BUTTON, callback_data=ADMIN_REPORT_PARSER_OFFERS)],
+            [InlineKeyboardButton(text=ADMIN_REPORT_RECALC_BUTTON, callback_data=ADMIN_REPORT_RECALCULATION)],
+            [InlineKeyboardButton(text=ADMIN_REPORT_ERRORS_BUTTON, callback_data=ADMIN_REPORT_USER_ERRORS)],
+        ]
+    )
+
+
+def build_admin_statistics_inline_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton(text=ADMIN_STATS_TOTAL_USERS_BUTTON, callback_data=ADMIN_STAT_TOTAL_USERS)],
+            [InlineKeyboardButton(text=ADMIN_STATS_PRICE_TABLE_BUTTON, callback_data=ADMIN_STAT_PRICE_TABLE)],
+            [InlineKeyboardButton(text=ADMIN_STATS_NEW_USERS_BUTTON, callback_data=ADMIN_STAT_NEW_USERS)],
+            [InlineKeyboardButton(text=ADMIN_STATS_BLOCKED_BUTTON, callback_data=ADMIN_STAT_BLOCKED)],
+        ]
     )

@@ -13,9 +13,11 @@ from src.presentation.telegram.callbacks.data_parser import (
     NAV_BACK_QUOTES_CATEGORIES,
     NAV_BACK_QUOTES_GROUP,
     NAV_MAIN,
+    PREFIX_ADMIN,
     PREFIX_AVAILABLE_CATEGORY,
     PREFIX_AVAILABLE_OFFER,
     PREFIX_AVAILABLE_PERIOD,
+    PREFIX_AVAILABLE_REQUEST,
     PREFIX_BEST_CATEGORY,
     PREFIX_BEST_GROUP,
     PREFIX_EDIT_BANK,
@@ -125,6 +127,8 @@ class TelegramCallbackDispatcher:
     ) -> bool:
         if active_flow == ActiveFlow.REGISTRATION and not self._is_registration_flow_callback(data, session_state):
             return True
+        if active_flow == ActiveFlow.ADMIN_MENU and not self._is_admin_flow_callback(data):
+            return True
         if active_flow == ActiveFlow.AVAILABLE_ROOMS and not self._is_available_flow_callback(data):
             return True
         if active_flow == ActiveFlow.BEST_PERIODS and not self._is_best_periods_flow_callback(data):
@@ -146,6 +150,9 @@ class TelegramCallbackDispatcher:
     ) -> bool:
         if data.startswith(PREFIX_BEST_GROUP):
             await self._scenarios.best_periods.handle_best_group_callback(user_id, query, data)
+            return True
+        if data.startswith(PREFIX_ADMIN):
+            await self._scenarios.admin_menu.handle_admin_callback(user_id, query, data)
             return True
         if data.startswith(PREFIX_BEST_CATEGORY):
             await self._scenarios.best_periods.handle_best_category_callback(user_id, query, data)
@@ -200,6 +207,12 @@ class TelegramCallbackDispatcher:
                 await query.answer()
                 return True
             await self._scenarios.available_offers.handle_available_category_callback(user_id, query, data)
+            return True
+        if data.startswith(PREFIX_AVAILABLE_REQUEST):
+            if active_flow != ActiveFlow.AVAILABLE_ROOMS:
+                await query.answer()
+                return True
+            await self._scenarios.available_offers.handle_available_request_callback(user_id, query, data)
             return True
         if data.startswith(PREFIX_AVAILABLE_PERIOD):
             if active_flow != ActiveFlow.AVAILABLE_ROOMS:
@@ -267,6 +280,7 @@ class TelegramCallbackDispatcher:
         return data == NAV_BACK_AVAILABLE_CATEGORIES or data.startswith(
             (
                 PREFIX_AVAILABLE_CATEGORY,
+                PREFIX_AVAILABLE_REQUEST,
                 PREFIX_AVAILABLE_PERIOD,
                 PREFIX_AVAILABLE_OFFER,
             )
@@ -275,6 +289,10 @@ class TelegramCallbackDispatcher:
     @staticmethod
     def _is_registration_flow_callback(data: str, session_state: ConversationState) -> bool:
         return data.startswith(PREFIX_REGISTRATION_CATEGORY) or session_state == ConversationState.EDIT_GROUPS
+
+    @staticmethod
+    def _is_admin_flow_callback(data: str) -> bool:
+        return data.startswith(PREFIX_ADMIN)
 
     @staticmethod
     def _is_period_quotes_flow_callback(data: str) -> bool:

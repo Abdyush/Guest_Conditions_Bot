@@ -46,6 +46,18 @@ class BestPeriodDraft:
 
 
 @dataclass(slots=True)
+class AvailableRequestDraft:
+    group_idx: int | None = None
+    category_idx: int | None = None
+    source_period_idx: int | None = None
+    month_cursor: date | None = None
+    checkin: date | None = None
+    checkout: date | None = None
+    tariff: str | None = None
+    sent_to_admin: bool = False
+
+
+@dataclass(slots=True)
 class UserSession:
     state: ConversationState = ConversationState.IDLE
     active_flow: ActiveFlow | None = None
@@ -54,6 +66,7 @@ class UserSession:
     period_quotes: PeriodQuotesDraft | None = None
     available_category_names: list[str] | None = None
     available_category_rows: list | None = None
+    available_request: AvailableRequestDraft | None = None
 
 
 class InMemorySessionStore:
@@ -83,6 +96,7 @@ class InMemorySessionStore:
             period_quotes=self._deserialize_period_quotes(data.get("period_quotes")),
             available_category_names=self._deserialize_available_category_names(data.get("available_category_names")),
             available_category_rows=None,
+            available_request=self._deserialize_available_request(data.get("available_request")),
         )
         self._cache[telegram_user_id] = session
         return session
@@ -112,6 +126,7 @@ class InMemorySessionStore:
                 "best_period": self._serialize_best_period(session.best_period),
                 "period_quotes": self._serialize_period_quotes(session.period_quotes),
                 "available_category_names": self._serialize_available_category_names(session.available_category_names),
+                "available_request": self._serialize_available_request(session.available_request),
             },
         )
 
@@ -229,6 +244,36 @@ class InMemorySessionStore:
         if value is None:
             return None
         return list(value)
+
+    @staticmethod
+    def _serialize_available_request(draft: AvailableRequestDraft | None) -> dict | None:
+        if draft is None:
+            return None
+        return {
+            "group_idx": draft.group_idx,
+            "category_idx": draft.category_idx,
+            "source_period_idx": draft.source_period_idx,
+            "month_cursor": draft.month_cursor.isoformat() if draft.month_cursor else None,
+            "checkin": draft.checkin.isoformat() if draft.checkin else None,
+            "checkout": draft.checkout.isoformat() if draft.checkout else None,
+            "tariff": draft.tariff,
+            "sent_to_admin": draft.sent_to_admin,
+        }
+
+    @staticmethod
+    def _deserialize_available_request(payload) -> AvailableRequestDraft | None:
+        if not payload:
+            return None
+        return AvailableRequestDraft(
+            group_idx=payload.get("group_idx"),
+            category_idx=payload.get("category_idx"),
+            source_period_idx=payload.get("source_period_idx"),
+            month_cursor=date.fromisoformat(payload["month_cursor"]) if payload.get("month_cursor") else None,
+            checkin=date.fromisoformat(payload["checkin"]) if payload.get("checkin") else None,
+            checkout=date.fromisoformat(payload["checkout"]) if payload.get("checkout") else None,
+            tariff=payload.get("tariff"),
+            sent_to_admin=bool(payload.get("sent_to_admin", False)),
+        )
 
     @staticmethod
     def _serialize_active_flow(value: ActiveFlow | None) -> str | None:

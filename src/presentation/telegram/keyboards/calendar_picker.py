@@ -39,24 +39,26 @@ def build_period_calendar_keyboard(
     month_cursor: date,
     checkin: date | None,
     checkout: date | None,
+    callback_prefix: str = "cal",
 ) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
+    noop_data = f"{callback_prefix}:noop"
     month_title = f"{MONTH_NAMES_RU[month_cursor.month - 1]} {month_cursor.year}"
-    rows.append([InlineKeyboardButton(text=month_title, callback_data="cal:noop")])
-    rows.append([InlineKeyboardButton(text=x, callback_data="cal:noop") for x in WEEKDAY_SHORT_RU])
+    rows.append([InlineKeyboardButton(text=month_title, callback_data=noop_data)])
+    rows.append([InlineKeyboardButton(text=x, callback_data=noop_data) for x in WEEKDAY_SHORT_RU])
 
     cal = calendar.Calendar(firstweekday=0)
     for week in cal.monthdayscalendar(month_cursor.year, month_cursor.month):
         row: list[InlineKeyboardButton] = []
         for day in week:
             if day == 0:
-                row.append(InlineKeyboardButton(text=" ", callback_data="cal:noop"))
+                row.append(InlineKeyboardButton(text=" ", callback_data=noop_data))
                 continue
             day_date = date(month_cursor.year, month_cursor.month, day)
             row.append(
                 InlineKeyboardButton(
                     text=_render_day_text(day_date, checkin=checkin, checkout=checkout),
-                    callback_data=f"cal:day:{day_date.isoformat()}",
+                    callback_data=f"{callback_prefix}:day:{day_date.isoformat()}",
                 )
             )
         rows.append(row)
@@ -65,8 +67,8 @@ def build_period_calendar_keyboard(
     next_month = shift_month(month_cursor, 1).isoformat()
     rows.append(
         [
-            InlineKeyboardButton(text="«", callback_data=f"cal:nav:{prev_month}"),
-            InlineKeyboardButton(text="»", callback_data=f"cal:nav:{next_month}"),
+            InlineKeyboardButton(text="«", callback_data=f"{callback_prefix}:nav:{prev_month}"),
+            InlineKeyboardButton(text="»", callback_data=f"{callback_prefix}:nav:{next_month}"),
         ]
     )
     return InlineKeyboardMarkup(rows)

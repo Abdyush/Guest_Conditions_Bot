@@ -1,8 +1,24 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from telegram import Update
 from telegram.ext import ContextTypes
 
+from src.presentation.telegram.callbacks.data_parser import (
+    ADMIN_OPEN_REPORTS,
+    ADMIN_OPEN_STATISTICS,
+    ADMIN_OPEN_SYSTEM,
+    ADMIN_REPORT_PARSER_OFFERS,
+    ADMIN_REPORT_PARSER_RATES,
+    ADMIN_REPORT_RECALCULATION,
+    ADMIN_REPORT_USER_ERRORS,
+    ADMIN_STAT_BLOCKED,
+    ADMIN_STAT_NEW_USERS,
+    ADMIN_STAT_PRICE_TABLE,
+    ADMIN_STAT_TOTAL_USERS,
+    ADMIN_SYSTEM_OFFERS,
+    ADMIN_SYSTEM_RATES,
+    ADMIN_SYSTEM_RECALC,
+)
 from src.presentation.telegram.handlers.dependencies import TelegramHandlersDependencies
 from src.presentation.telegram.handlers.shared.navigation import send_main_menu_for_guest
 from src.presentation.telegram.keyboards.admin_menu import (
@@ -21,9 +37,13 @@ from src.presentation.telegram.keyboards.admin_menu import (
     ADMIN_STATS_PRICE_TABLE_BUTTON,
     ADMIN_STATS_TOTAL_USERS_BUTTON,
     ADMIN_SYSTEM_BUTTON,
+    build_admin_main_inline_keyboard,
     build_admin_main_keyboard,
+    build_admin_reports_inline_keyboard,
     build_admin_reports_keyboard,
+    build_admin_statistics_inline_keyboard,
     build_admin_statistics_keyboard,
+    build_admin_system_inline_keyboard,
     build_admin_system_keyboard,
 )
 from src.presentation.telegram.keyboards.main_menu import build_main_menu_keyboard
@@ -62,7 +82,7 @@ class AdminMenuScenario:
         session = await self._deps.sessions.get(user.id)
         session.state = ConversationState.ADMIN_MENU
         await self._deps.flow_guard.enter(user.id, ActiveFlow.ADMIN_MENU)
-        await message.reply_text(render_admin_main(), reply_markup=build_admin_main_keyboard())
+        await self._show_admin_main(message)
 
     async def handle_flow_text(self, telegram_user_id: int, text: str, message) -> bool:
         if not await self._deps.flow_guard.is_active(telegram_user_id, ActiveFlow.ADMIN_MENU):
@@ -75,19 +95,19 @@ class AdminMenuScenario:
         session = await self._deps.sessions.get(telegram_user_id)
         if text == ADMIN_SYSTEM_BUTTON:
             session.state = ConversationState.ADMIN_SYSTEM
-            await message.reply_text(render_admin_system_menu(), reply_markup=build_admin_system_keyboard())
+            await self._show_admin_system(message)
             return True
         if text == ADMIN_REPORTS_BUTTON:
             session.state = ConversationState.ADMIN_REPORTS
-            await message.reply_text(render_admin_reports_menu(), reply_markup=build_admin_reports_keyboard())
+            await self._show_admin_reports(message)
             return True
         if text == ADMIN_STATISTICS_BUTTON:
             session.state = ConversationState.ADMIN_STATISTICS
-            await message.reply_text(render_admin_statistics_menu(), reply_markup=build_admin_statistics_keyboard())
+            await self._show_admin_statistics(message)
             return True
         if text == ADMIN_BACK_BUTTON:
             session.state = ConversationState.ADMIN_MENU
-            await message.reply_text(render_admin_main(), reply_markup=build_admin_main_keyboard())
+            await self._show_admin_main(message)
             return True
 
         if session.state == ConversationState.ADMIN_SYSTEM:
@@ -97,8 +117,54 @@ class AdminMenuScenario:
         if session.state == ConversationState.ADMIN_STATISTICS:
             return await self._handle_statistics_action(text=text, message=message)
 
-        await message.reply_text(render_admin_main(), reply_markup=build_admin_main_keyboard())
+        await self._show_admin_main(message)
         return True
+
+    async def handle_admin_callback(self, telegram_user_id: int, query, data: str) -> None:
+        if not self.is_admin(telegram_user_id):
+            await self._deps.sessions.reset(telegram_user_id)
+            await query.answer()
+            if query.message is not None:
+                await query.message.reply_text(render_admin_access_denied())
+            return
+        if not await self._deps.flow_guard.is_active(telegram_user_id, ActiveFlow.ADMIN_MENU):
+            await query.answer()
+            return
+
+        session = await self._deps.sessions.get(telegram_user_id)
+        if data == ADMIN_OPEN_SYSTEM:
+            session.state = ConversationState.ADMIN_SYSTEM
+            await query.answer()
+            if query.message is not None:
+                await query.message.reply_text(render_admin_system_menu(), reply_markup=build_admin_system_keyboard())
+                await query.edit_message_text(render_admin_system_menu(), reply_markup=build_admin_system_inline_keyboard())
+            return
+        if data == ADMIN_OPEN_REPORTS:
+            session.state = ConversationState.ADMIN_REPORTS
+            await query.answer()
+            if query.message is not None:
+                await query.message.reply_text(render_admin_reports_menu(), reply_markup=build_admin_reports_keyboard())
+                await query.edit_message_text(render_admin_reports_menu(), reply_markup=build_admin_reports_inline_keyboard())
+            return
+        if data == ADMIN_OPEN_STATISTICS:
+            session.state = ConversationState.ADMIN_STATISTICS
+            await query.answer()
+            if query.message is not None:
+                await query.message.reply_text(render_admin_statistics_menu(), reply_markup=build_admin_statistics_keyboard())
+                await query.edit_message_text(render_admin_statistics_menu(), reply_markup=build_admin_statistics_inline_keyboard())
+            return
+
+        if session.state == ConversationState.ADMIN_SYSTEM:
+            await self._handle_system_callback(telegram_user_id=telegram_user_id, query=query, data=data)
+            return
+        if session.state == ConversationState.ADMIN_REPORTS:
+            await self._handle_report_callback(query=query, data=data)
+            return
+        if session.state == ConversationState.ADMIN_STATISTICS:
+            await self._handle_statistics_callback(query=query, data=data)
+            return
+
+        await query.answer()
 
     async def _handle_system_action(self, *, telegram_user_id: int, text: str, message) -> bool:
         if text == ADMIN_RUN_RATES_BUTTON:
@@ -136,6 +202,48 @@ class AdminMenuScenario:
             return True
         return False
 
+    async def _handle_system_callback(self, *, telegram_user_id: int, query, data: str) -> None:
+        if data == ADMIN_SYSTEM_RATES:
+            attempt = await self._deps.pipeline.run_categories_parser(trigger=f"admin_menu:{telegram_user_id}:rates")
+            await query.answer()
+            if query.message is not None:
+                await query.edit_message_text(
+                    render_system_attempt_result(
+                        title="Запуск парсера цен",
+                        attempt_started=attempt.started,
+                        attempt_message=attempt.message,
+                    ),
+                    reply_markup=build_admin_system_inline_keyboard(),
+                )
+            return
+        if data == ADMIN_SYSTEM_OFFERS:
+            attempt = await self._deps.pipeline.run_offers_parser(trigger=f"admin_menu:{telegram_user_id}:offers")
+            await query.answer()
+            if query.message is not None:
+                await query.edit_message_text(
+                    render_system_attempt_result(
+                        title="Запуск парсера офферов",
+                        attempt_started=attempt.started,
+                        attempt_message=attempt.message,
+                    ),
+                    reply_markup=build_admin_system_inline_keyboard(),
+                )
+            return
+        if data == ADMIN_SYSTEM_RECALC:
+            attempt = await self._deps.pipeline.run_recalculation(trigger=f"admin_menu:{telegram_user_id}:recalculation")
+            await query.answer()
+            if query.message is not None:
+                await query.edit_message_text(
+                    render_system_attempt_result(
+                        title="Запуск пересчета цен",
+                        attempt_started=attempt.started,
+                        attempt_message=attempt.message,
+                    ),
+                    reply_markup=build_admin_system_inline_keyboard(),
+                )
+            return
+        await query.answer()
+
     async def _handle_report_action(self, *, text: str, message) -> bool:
         reports = self._deps.admin.get_admin_reports()
         report_key_by_button = {
@@ -149,6 +257,22 @@ class AdminMenuScenario:
             return False
         await message.reply_text(render_admin_report(reports[key]), reply_markup=build_admin_reports_keyboard())
         return True
+
+    async def _handle_report_callback(self, *, query, data: str) -> None:
+        reports = self._deps.admin.get_admin_reports()
+        report_key_by_callback = {
+            ADMIN_REPORT_PARSER_RATES: "parser_rates",
+            ADMIN_REPORT_PARSER_OFFERS: "parser_offers",
+            ADMIN_REPORT_RECALCULATION: "recalculation",
+            ADMIN_REPORT_USER_ERRORS: "user_errors",
+        }
+        key = report_key_by_callback.get(data)
+        if key is None:
+            await query.answer()
+            return
+        await query.answer()
+        if query.message is not None:
+            await query.edit_message_text(render_admin_report(reports[key]), reply_markup=build_admin_reports_inline_keyboard())
 
     async def _handle_statistics_action(self, *, text: str, message) -> bool:
         stats = self._deps.admin.get_admin_statistics()
@@ -166,13 +290,46 @@ class AdminMenuScenario:
             return True
         return False
 
+    async def _handle_statistics_callback(self, *, query, data: str) -> None:
+        stats = self._deps.admin.get_admin_statistics()
+        if data == ADMIN_STAT_TOTAL_USERS:
+            await query.answer()
+            if query.message is not None:
+                await query.edit_message_text(render_total_users(stats.total_users), reply_markup=build_admin_statistics_inline_keyboard())
+            return
+        if data == ADMIN_STAT_PRICE_TABLE:
+            await query.answer()
+            if query.message is not None:
+                await query.edit_message_text(
+                    render_price_expectations_table(stats.desired_price_by_group),
+                    reply_markup=build_admin_statistics_inline_keyboard(),
+                )
+            return
+        if data == ADMIN_STAT_NEW_USERS:
+            await query.answer()
+            if query.message is not None:
+                await query.edit_message_text(
+                    render_new_users_last_week(stats.new_users_last_week),
+                    reply_markup=build_admin_statistics_inline_keyboard(),
+                )
+            return
+        if data == ADMIN_STAT_BLOCKED:
+            await query.answer()
+            if query.message is not None:
+                await query.edit_message_text(
+                    render_blocked_users_last_week(stats.blocked_users_last_week),
+                    reply_markup=build_admin_statistics_inline_keyboard(),
+                )
+            return
+        await query.answer()
+
     async def handle_back(self, telegram_user_id: int, message) -> bool:
         if not await self._deps.flow_guard.is_active(telegram_user_id, ActiveFlow.ADMIN_MENU):
             return False
         session = await self._deps.sessions.get(telegram_user_id)
         if session.state in {ConversationState.ADMIN_SYSTEM, ConversationState.ADMIN_REPORTS, ConversationState.ADMIN_STATISTICS}:
             session.state = ConversationState.ADMIN_MENU
-            await message.reply_text(render_admin_main(), reply_markup=build_admin_main_keyboard())
+            await self._show_admin_main(message)
             return True
         if session.state == ConversationState.ADMIN_MENU:
             await self._deps.sessions.reset(telegram_user_id)
@@ -184,3 +341,18 @@ class AdminMenuScenario:
             return True
         return False
 
+    async def _show_admin_main(self, message) -> None:
+        await message.reply_text(render_admin_main(), reply_markup=build_admin_main_keyboard())
+        await message.reply_text(render_admin_main(), reply_markup=build_admin_main_inline_keyboard())
+
+    async def _show_admin_system(self, message) -> None:
+        await message.reply_text(render_admin_system_menu(), reply_markup=build_admin_system_keyboard())
+        await message.reply_text(render_admin_system_menu(), reply_markup=build_admin_system_inline_keyboard())
+
+    async def _show_admin_reports(self, message) -> None:
+        await message.reply_text(render_admin_reports_menu(), reply_markup=build_admin_reports_keyboard())
+        await message.reply_text(render_admin_reports_menu(), reply_markup=build_admin_reports_inline_keyboard())
+
+    async def _show_admin_statistics(self, message) -> None:
+        await message.reply_text(render_admin_statistics_menu(), reply_markup=build_admin_statistics_keyboard())
+        await message.reply_text(render_admin_statistics_menu(), reply_markup=build_admin_statistics_inline_keyboard())
