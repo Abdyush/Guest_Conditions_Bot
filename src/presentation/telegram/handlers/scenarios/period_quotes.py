@@ -46,16 +46,25 @@ class PeriodQuotesScenario:
             return
 
         session = await self._deps.sessions.get(telegram_user_id)
-        session.state = ConversationState.AWAIT_QUOTES_GROUP
-        session.period_quotes = None
+        session.state = ConversationState.AWAIT_QUOTES_CALENDAR
+        session.period_quotes = PeriodQuotesDraft(
+            group_id=None,
+            month_cursor=date.today().replace(day=1),
+            checkin=None,
+            checkout=None,
+        )
         await self._deps.flow_guard.enter(telegram_user_id, ActiveFlow.PERIOD_QUOTES)
         await message.reply_text(
             "Сценарий «Цены на период» открыт. Для выхода используйте кнопку «Главное меню» ниже.",
             reply_markup=build_period_quotes_scenario_keyboard(),
         )
         await message.reply_text(
-            render_period_quotes_groups_prompt(),
-            reply_markup=build_period_quotes_groups_inline_keyboard(),
+            text=render_period_quotes_calendar_prompt(),
+            reply_markup=build_period_quotes_calendar_inline_keyboard(
+                month_cursor=session.period_quotes.month_cursor,
+                checkin=session.period_quotes.checkin,
+                checkout=session.period_quotes.checkout,
+            ),
         )
 
     async def is_active(self, telegram_user_id: int) -> bool:
@@ -85,28 +94,30 @@ class PeriodQuotesScenario:
 
         group_id = data.split(":", 1)[1].strip().upper()
         session = await self._deps.sessions.get(telegram_user_id)
-        session.state = ConversationState.AWAIT_QUOTES_CALENDAR
-        session.period_quotes = PeriodQuotesDraft(
-            group_id=group_id,
-            month_cursor=date.today().replace(day=1),
-            checkin=None,
-            checkout=None,
-        )
+        draft = session.period_quotes
+        if session.state != ConversationState.AWAIT_QUOTES_GROUP or draft is None or draft.checkin is None or draft.checkout is None:
+            await query.answer()
+            return
+
+        category_names = self._category_names_for_group(quotes=draft.quotes or [], group_id=group_id)
+        if not category_names:
+            await query.answer()
+            return
+
+        draft.group_id = group_id
+        draft.category_names = category_names
+        session.state = ConversationState.AWAIT_QUOTES_CATEGORY
         await query.answer()
         if query.message is not None:
             await query.edit_message_text(
-                text=render_period_quotes_calendar_prompt(),
-                reply_markup=build_period_quotes_calendar_inline_keyboard(
-                    month_cursor=session.period_quotes.month_cursor,
-                    checkin=session.period_quotes.checkin,
-                    checkout=session.period_quotes.checkout,
-                ),
+                text=render_period_quotes_category_prompt(period_start=draft.checkin, period_end=draft.checkout),
+                reply_markup=build_period_quotes_categories_inline_keyboard(category_names=category_names),
             )
 
     async def handle_calendar_callback(self, telegram_user_id: int, query, data: str) -> None:
         session = await self._deps.sessions.get(telegram_user_id)
         draft = session.period_quotes
-        if session.state != ConversationState.AWAIT_QUOTES_CALENDAR or draft is None or draft.group_id is None or draft.month_cursor is None:
+        if session.state != ConversationState.AWAIT_QUOTES_CALENDAR or draft is None or draft.month_cursor is None:
             await query.answer()
             return
 
@@ -174,10 +185,12 @@ class PeriodQuotesScenario:
             await self._finish_period_quotes_by_calendar(
                 telegram_user_id=telegram_user_id,
                 query=query,
-                group_id=draft.group_id,
                 period_start=draft.checkin,
                 period_end=draft.checkout,
             )
+            return
+
+        await query.answer()
 
     async def handle_quotes_category_callback(self, telegram_user_id: int, query, data: str) -> None:
         guest_id = self._deps.identity.resolve_guest_id(telegram_user_id=telegram_user_id)
@@ -224,7 +237,7 @@ class PeriodQuotesScenario:
 
         session = await self._deps.sessions.get(telegram_user_id)
         draft = session.period_quotes
-        if draft is None:
+        if draft is None or draft.group_id is None:
             await query.answer()
             return
 
@@ -234,7 +247,11 @@ class PeriodQuotesScenario:
             return
 
         category_name = category_names[category_idx]
-        quotes = [item for item in (draft.quotes or []) if item.category_name == category_name]
+        quotes = [
+            item
+            for item in (draft.quotes or [])
+            if item.category_name == category_name and item.group_id == draft.group_id
+        ]
         row_with_offer = next((item for item in quotes if item.offer_id or item.offer_title), None)
         if row_with_offer is None:
             await query.answer("Текст специального предложения не найден.", show_alert=False)
@@ -282,23 +299,17 @@ class PeriodQuotesScenario:
     async def handle_nav_back_group(self, telegram_user_id: int, query) -> None:
         await query.answer()
         session = await self._deps.sessions.get(telegram_user_id)
-        session.state = ConversationState.AWAIT_QUOTES_GROUP
-        session.period_quotes = None
-        if query.message is not None:
-            await query.edit_message_text(
-                render_period_quotes_groups_prompt(),
-                reply_markup=build_period_quotes_groups_inline_keyboard(),
-            )
-
-    async def handle_nav_back_calendar(self, telegram_user_id: int, query) -> None:
-        await query.answer()
-        session = await self._deps.sessions.get(telegram_user_id)
         draft = session.period_quotes
         if draft is None or draft.month_cursor is None:
             return
         session.state = ConversationState.AWAIT_QUOTES_CALENDAR
         if draft.checkin is not None:
             draft.month_cursor = draft.checkin.replace(day=1)
+        draft.group_id = None
+        draft.category_names = None
+        draft.run_id = None
+        draft.quotes = None
+        draft.last_room_dates_by_category = None
         draft.checkin = None
         draft.checkout = None
         if query.message is not None:
@@ -309,6 +320,22 @@ class PeriodQuotesScenario:
                     checkin=draft.checkin,
                     checkout=draft.checkout,
                 ),
+            )
+
+    async def handle_nav_back_calendar(self, telegram_user_id: int, query) -> None:
+        await query.answer()
+        session = await self._deps.sessions.get(telegram_user_id)
+        draft = session.period_quotes
+        if draft is None or draft.checkin is None or draft.checkout is None:
+            return
+        session.state = ConversationState.AWAIT_QUOTES_GROUP
+        draft.group_id = None
+        draft.category_names = None
+        available_group_ids = self._available_group_ids_from_quotes(draft.quotes or [])
+        if query.message is not None:
+            await query.edit_message_text(
+                render_period_quotes_groups_prompt(),
+                reply_markup=build_period_quotes_groups_inline_keyboard(group_ids=available_group_ids),
             )
 
     async def handle_nav_back_categories(self, telegram_user_id: int, query) -> None:
@@ -329,10 +356,27 @@ class PeriodQuotesScenario:
         session = await self._deps.sessions.get(telegram_user_id)
         if session.state == ConversationState.AWAIT_QUOTES_CATEGORY:
             draft = session.period_quotes
+            if draft is not None and draft.checkin is not None and draft.checkout is not None:
+                session.state = ConversationState.AWAIT_QUOTES_GROUP
+                draft.group_id = None
+                draft.category_names = None
+                available_group_ids = self._available_group_ids_from_quotes(draft.quotes or [])
+                await message.reply_text(
+                    render_period_quotes_groups_prompt(),
+                    reply_markup=build_period_quotes_groups_inline_keyboard(group_ids=available_group_ids),
+                )
+                return True
+        if session.state == ConversationState.AWAIT_QUOTES_GROUP:
+            draft = session.period_quotes
             if draft is not None and draft.month_cursor is not None:
                 session.state = ConversationState.AWAIT_QUOTES_CALENDAR
                 if draft.checkin is not None:
                     draft.month_cursor = draft.checkin.replace(day=1)
+                draft.group_id = None
+                draft.category_names = None
+                draft.run_id = None
+                draft.quotes = None
+                draft.last_room_dates_by_category = None
                 draft.checkin = None
                 draft.checkout = None
                 await message.reply_text(
@@ -345,13 +389,6 @@ class PeriodQuotesScenario:
                 )
                 return True
         if session.state == ConversationState.AWAIT_QUOTES_CALENDAR:
-            session.state = ConversationState.AWAIT_QUOTES_GROUP
-            await message.reply_text(
-                render_period_quotes_groups_prompt(),
-                reply_markup=build_period_quotes_groups_inline_keyboard(),
-            )
-            return True
-        if session.state == ConversationState.AWAIT_QUOTES_GROUP:
             await self._deps.sessions.reset(telegram_user_id)
             await send_main_menu_for_guest(deps=self._deps, message=message, guest_id=guest_id)
             return True
@@ -362,7 +399,6 @@ class PeriodQuotesScenario:
         *,
         telegram_user_id: int,
         query,
-        group_id: str,
         period_start: date,
         period_end: date,
     ) -> None:
@@ -379,7 +415,7 @@ class PeriodQuotesScenario:
                 guest_id=guest_id,
                 period_start=period_start,
                 period_end=period_end,
-                group_ids={group_id},
+                group_ids=None,
             )
             last_room_dates_by_category: dict[str, list[date]] = {}
             for category_name in {item.category_name for item in quotes}:
@@ -403,19 +439,20 @@ class PeriodQuotesScenario:
         if draft is None:
             draft = PeriodQuotesDraft()
             session.period_quotes = draft
-        draft.group_id = group_id
+        draft.group_id = None
         draft.checkin = period_start
         draft.checkout = period_end
         draft.run_id = run_id
         draft.quotes = quotes
         draft.last_room_dates_by_category = last_room_dates_by_category
-        draft.category_names = sorted({item.category_name for item in quotes})
-        session.state = ConversationState.AWAIT_QUOTES_CATEGORY
+        draft.category_names = None
+        session.state = ConversationState.AWAIT_QUOTES_GROUP
 
         if query.message is None:
             return
 
-        if not draft.category_names:
+        available_group_ids = self._available_group_ids_from_quotes(quotes)
+        if not available_group_ids:
             await query.edit_message_text(
                 render_period_quotes_empty(period_start=period_start, period_end=period_end),
                 reply_markup=build_period_quotes_empty_inline_keyboard(),
@@ -423,14 +460,14 @@ class PeriodQuotesScenario:
             return
 
         await query.edit_message_text(
-            text=render_period_quotes_category_prompt(period_start=period_start, period_end=period_end),
-            reply_markup=build_period_quotes_categories_inline_keyboard(category_names=draft.category_names),
+            text=render_period_quotes_groups_prompt(),
+            reply_markup=build_period_quotes_groups_inline_keyboard(group_ids=available_group_ids),
         )
 
     async def _show_category_result(self, *, guest_id: str, telegram_user_id: int, query, category_idx: int) -> None:
         session = await self._deps.sessions.get(telegram_user_id)
         draft = session.period_quotes
-        if draft is None or draft.checkin is None or draft.checkout is None:
+        if draft is None or draft.checkin is None or draft.checkout is None or draft.group_id is None:
             await query.answer()
             return
 
@@ -440,7 +477,11 @@ class PeriodQuotesScenario:
             return
 
         category_name = category_names[category_idx]
-        quotes = [item for item in (draft.quotes or []) if item.category_name == category_name]
+        quotes = [
+            item
+            for item in (draft.quotes or [])
+            if item.category_name == category_name and item.group_id == draft.group_id
+        ]
         if not quotes:
             await query.answer()
             return
@@ -463,3 +504,11 @@ class PeriodQuotesScenario:
                     has_offer_text=has_offer_text,
                 ),
             )
+
+    @staticmethod
+    def _available_group_ids_from_quotes(quotes) -> list[str]:
+        return sorted({item.group_id for item in quotes if item.group_id})
+
+    @staticmethod
+    def _category_names_for_group(*, quotes, group_id: str) -> list[str]:
+        return sorted({item.category_name for item in quotes if item.group_id == group_id})
