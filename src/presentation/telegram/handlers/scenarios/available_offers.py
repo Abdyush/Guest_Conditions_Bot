@@ -5,16 +5,16 @@ from datetime import date
 
 from src.presentation.telegram.handlers.dependencies import TelegramHandlersDependencies
 from src.presentation.telegram.keyboards.available_offers import (
-    AVREQ_CONTACT_UNAVAILABLE,
     build_available_categories_inline_keyboard,
     build_available_groups_inline_keyboard,
     build_available_offer_text_inline_keyboard,
     build_available_period_details_inline_keyboard,
     build_available_periods_inline_keyboard,
-    build_available_request_calendar_inline_keyboard,
-    build_available_request_result_inline_keyboard,
-    build_available_request_tariff_inline_keyboard,
     build_available_scenario_keyboard,
+)
+from src.presentation.telegram.handlers.subflows.interest_request import (
+    InterestRequestStartContext,
+    InterestRequestSubflow,
 )
 from src.presentation.telegram.keyboards.main_menu import (
     AVAILABLE_ROOMS_BUTTON,
@@ -37,13 +37,8 @@ from src.presentation.telegram.presenters.available_presenter import (
     render_available_offer_text,
     render_available_period_details,
     render_available_periods_prompt,
-    render_available_request_calendar_prompt,
-    render_available_request_tariff_prompt,
-    render_available_interest_message,
-    tariff_label,
 )
 from src.presentation.telegram.state.active_flow import ActiveFlow
-from src.presentation.telegram.state.session_store import AvailableRequestDraft
 from src.presentation.telegram.ui_texts import msg
 
 
@@ -53,6 +48,10 @@ logger = logging.getLogger(__name__)
 class AvailableOffersScenario:
     def __init__(self, *, deps: TelegramHandlersDependencies):
         self._deps = deps
+        self._interest_request = InterestRequestSubflow(
+            deps=deps,
+            adapter=_AvailableInterestRequestAdapter(self),
+        )
 
     async def open_available_categories(self, telegram_user_id: int, message) -> None:
         guest_id = self._deps.identity.resolve_guest_id(telegram_user_id=telegram_user_id)
@@ -65,7 +64,7 @@ class AvailableOffersScenario:
         session = await self._deps.sessions.get(telegram_user_id)
         session.available_category_names = None
         session.available_category_rows = None
-        session.available_request = None
+        session.interest_request = None
         if not groups:
             await self._deps.flow_guard.leave(telegram_user_id)
             await message.reply_text(msg("available_none"), reply_markup=build_main_menu_keyboard())
@@ -217,47 +216,12 @@ class AvailableOffersScenario:
                 ),
             )
 
-    async def handle_available_request_callback(self, telegram_user_id: int, query, data: str) -> None:
-        guest_id = self._deps.identity.resolve_guest_id(telegram_user_id=telegram_user_id)
-        if not guest_id:
-            await self._deps.flow_guard.leave(telegram_user_id)
-            await query.answer()
-            if query.message is not None:
-                await query.message.reply_text(msg("auth_required"), reply_markup=build_phone_request_keyboard())
-            return
-
-        if data == AVREQ_CONTACT_UNAVAILABLE:
-            await self._send_available_request_to_admin(
-                guest_id=guest_id,
-                telegram_user_id=telegram_user_id,
-                query=query,
-            )
-            return
-        if data.startswith("avreq:start:"):
-            await self._start_available_request(guest_id=guest_id, telegram_user_id=telegram_user_id, query=query, data=data)
-            return
-        if data.startswith("avreq:cal:"):
-            await self._handle_available_request_calendar(guest_id=guest_id, telegram_user_id=telegram_user_id, query=query, data=data)
-            return
-        if data.startswith("avreq:tariff:"):
-            await self._handle_available_request_tariff(guest_id=guest_id, telegram_user_id=telegram_user_id, query=query, data=data)
-            return
-        if data == "avreq:back:detail":
-            await self._show_available_request_source_details(guest_id=guest_id, telegram_user_id=telegram_user_id, query=query)
-            return
-        if data == "avreq:back:calendar":
-            session = await self._deps.sessions.get(telegram_user_id)
-            draft = session.available_request
-            if draft is not None:
-                draft.checkin = None
-                draft.checkout = None
-            await self._show_available_request_calendar(guest_id=guest_id, telegram_user_id=telegram_user_id, query=query)
-            return
-        if data.startswith("avreq:back:categories:"):
-            await self._show_available_request_categories(guest_id=guest_id, telegram_user_id=telegram_user_id, query=query, data=data)
-            return
-
-        await query.answer()
+    async def handle_interest_request_callback(self, telegram_user_id: int, query, data: str) -> None:
+        await self._interest_request.handle_callback(
+            telegram_user_id=telegram_user_id,
+            query=query,
+            data=data,
+        )
 
     async def handle_notified_category_callback(self, telegram_user_id: int, query, data: str) -> None:
         guest_id = self._deps.identity.resolve_guest_id(telegram_user_id=telegram_user_id)
@@ -410,7 +374,7 @@ class AvailableOffersScenario:
             return
 
         session = await self._deps.sessions.get(telegram_user_id)
-        session.available_request = None
+        session.interest_request = None
         groups = self._available_groups_for_guest(guest_id=guest_id)
         if query.message is not None:
             if not groups:
@@ -455,7 +419,7 @@ class AvailableOffersScenario:
         session = await self._deps.sessions.get(telegram_user_id)
         session.available_category_names = list(selected_group.categories)
         session.available_category_rows = None
-        session.available_request = None
+        session.interest_request = None
 
         await query.answer()
         if query.message is not None:
@@ -495,7 +459,7 @@ class AvailableOffersScenario:
 
         periods = build_available_breakfast_periods(rows=rows)
         session = await self._deps.sessions.get(telegram_user_id)
-        session.available_request = None
+        session.interest_request = None
 
         await query.answer()
         if query.message is not None:
@@ -546,7 +510,7 @@ class AvailableOffersScenario:
 
         session = await self._deps.sessions.get(telegram_user_id)
         if not preserve_request:
-            session.available_request = None
+            session.interest_request = None
         period = periods[period_idx]
         last_room_dates = self._deps.available_offers.get_last_room_dates(
             guest_id=guest_id,
@@ -569,16 +533,56 @@ class AvailableOffersScenario:
                 ),
             )
 
-    async def _start_available_request(self, *, guest_id: str, telegram_user_id: int, query, data: str) -> None:
-        parts = data.split(":")
-        if len(parts) != 5:
+    async def _show_interest_request_source_details(self, *, guest_id: str, telegram_user_id: int, query) -> None:
+        session = await self._deps.sessions.get(telegram_user_id)
+        draft = session.interest_request
+        if (
+            draft is None
+            or draft.source_group_idx is None
+            or draft.source_category_idx is None
+            or draft.source_period_idx is None
+        ):
             await query.answer()
             return
+        await self._show_available_period_details(
+            guest_id=guest_id,
+            telegram_user_id=telegram_user_id,
+            query=query,
+            group_idx_raw=str(draft.source_group_idx),
+            category_idx_raw=str(draft.source_category_idx),
+            period_idx_raw=str(draft.source_period_idx),
+            preserve_request=True,
+        )
 
-        parsed = _parse_three_indices(parts[2], parts[3], parts[4])
-        if parsed is None:
+    async def _show_interest_request_categories(self, *, guest_id: str, telegram_user_id: int, query) -> None:
+        session = await self._deps.sessions.get(telegram_user_id)
+        draft = session.interest_request
+        group_idx = None if draft is None else draft.source_group_idx
+        session.interest_request = None
+        if group_idx is None:
             await query.answer()
             return
+        await self._show_available_group_categories(
+            guest_id=guest_id,
+            telegram_user_id=telegram_user_id,
+            query=query,
+            group_idx_raw=str(group_idx),
+        )
+
+    async def _resolve_available_interest_start_context(
+        self,
+        *,
+        guest_id: str,
+        telegram_user_id: int,
+        data: str,
+    ) -> InterestRequestStartContext | None:
+        parts = data.split(":")
+        if len(parts) != 6 or parts[2] != "available":
+            return None
+
+        parsed = _parse_three_indices(parts[3], parts[4], parts[5])
+        if parsed is None:
+            return None
         group_idx, category_idx, period_idx = parsed
 
         context = await self._resolve_available_context(
@@ -588,263 +592,23 @@ class AvailableOffersScenario:
             category_idx=category_idx,
         )
         if context is None:
-            await query.answer()
-            return
-        _, rows = context
+            return None
+        category_name, rows = context
 
         periods = build_available_periods(rows=rows)
         if period_idx < 0 or period_idx >= len(periods):
-            await query.answer()
-            return
+            return None
 
         source_period = periods[period_idx]
-        session = await self._deps.sessions.get(telegram_user_id)
-        session.available_request = AvailableRequestDraft(
-            group_idx=group_idx,
-            category_idx=category_idx,
-            source_period_idx=period_idx,
-            month_cursor=source_period.display_start.replace(day=1),
-            checkin=None,
-            checkout=None,
-            tariff=None,
-            sent_to_admin=False,
-        )
-        await self._show_available_request_calendar(
-            guest_id=guest_id,
-            telegram_user_id=telegram_user_id,
-            query=query,
-        )
-
-    async def _handle_available_request_calendar(self, *, guest_id: str, telegram_user_id: int, query, data: str) -> None:
-        session = await self._deps.sessions.get(telegram_user_id)
-        draft = session.available_request
-        if draft is None or draft.month_cursor is None:
-            await query.answer()
-            return
-
-        if data == "avreq:cal:noop":
-            await query.answer()
-            return
-        if data.startswith("avreq:cal:nav:"):
-            raw = data.split(":", 3)[3]
-            try:
-                draft.month_cursor = date.fromisoformat(raw).replace(day=1)
-            except ValueError:
-                await query.answer()
-                return
-            await query.answer()
-            if query.message is not None:
-                await query.edit_message_reply_markup(
-                    reply_markup=build_available_request_calendar_inline_keyboard(
-                        month_cursor=draft.month_cursor,
-                        checkin=draft.checkin,
-                        checkout=draft.checkout,
-                        group_idx=draft.group_idx or 0,
-                    )
-                )
-            return
-        if not data.startswith("avreq:cal:day:"):
-            await query.answer()
-            return
-
-        try:
-            picked = date.fromisoformat(data.split(":", 3)[3])
-        except ValueError:
-            await query.answer()
-            return
-
-        if draft.checkin is None:
-            draft.checkin = picked
-            draft.checkout = None
-            draft.month_cursor = picked.replace(day=1)
-            await query.answer()
-            if query.message is not None:
-                await query.edit_message_reply_markup(
-                    reply_markup=build_available_request_calendar_inline_keyboard(
-                        month_cursor=draft.month_cursor,
-                        checkin=draft.checkin,
-                        checkout=draft.checkout,
-                        group_idx=draft.group_idx or 0,
-                    )
-                )
-            return
-
-        if draft.checkout is None:
-            if picked <= draft.checkin:
-                draft.checkin = picked
-                draft.checkout = None
-                draft.month_cursor = picked.replace(day=1)
-                await query.answer()
-                if query.message is not None:
-                    await query.edit_message_reply_markup(
-                        reply_markup=build_available_request_calendar_inline_keyboard(
-                            month_cursor=draft.month_cursor,
-                            checkin=draft.checkin,
-                            checkout=None,
-                            group_idx=draft.group_idx or 0,
-                        )
-                    )
-                return
-
-            draft.checkout = picked
-            await self._show_available_request_tariff(
-                guest_id=guest_id,
-                telegram_user_id=telegram_user_id,
-                query=query,
-            )
-            return
-
-        await query.answer()
-
-    async def _handle_available_request_tariff(self, *, guest_id: str, telegram_user_id: int, query, data: str) -> None:
-        session = await self._deps.sessions.get(telegram_user_id)
-        draft = session.available_request
-        if draft is None or draft.checkin is None or draft.checkout is None:
-            await query.answer()
-            return
-
-        tariff_code = data.split(":", 2)[2].strip().lower()
-        if tariff_code not in {"breakfast", "fullpansion"}:
-            await query.answer()
-            return
-        draft.tariff = tariff_code
-        draft.sent_to_admin = False
-
-        context = await self._resolve_available_context(
-            guest_id=guest_id,
-            telegram_user_id=telegram_user_id,
-            group_idx=draft.group_idx,
-            category_idx=draft.category_idx,
-        )
-        if context is None:
-            await query.answer()
-            return
-        category_name, rows = context
-
-        profile = self._deps.profile.get_guest_profile(guest_id=guest_id)
-        if profile is None:
-            await query.answer()
-            if query.message is not None:
-                await query.message.reply_text(msg("auth_required"), reply_markup=build_phone_request_keyboard())
-            return
-        open_price_minor, preliminary_price_minor, loyalty_status, special_offers = self._resolve_available_request_quote_summary(
-            guest_id=guest_id,
+        group_ids = sorted({row.group_id for row in rows if getattr(row, "group_id", None)})
+        return InterestRequestStartContext(
+            source_kind="available",
             category_name=category_name,
-            period_start=draft.checkin,
-            period_end=draft.checkout,
-            tariff=draft.tariff,
-            rows=rows,
-        )
-
-        await query.answer()
-        if query.message is not None:
-            await query.edit_message_text(
-                render_available_interest_message(
-                    category_name=category_name,
-                    period_start=draft.checkin,
-                    period_end=draft.checkout,
-                    tariff_label=tariff_label(draft.tariff),
-                    open_price_minor=open_price_minor,
-                    preliminary_price_minor=preliminary_price_minor,
-                    adults=profile.occupancy.adults,
-                    loyalty_status=loyalty_status,
-                    special_offers=special_offers,
-                    children_4_13=profile.occupancy.children_4_13,
-                    infants_0_3=profile.occupancy.infants,
-                ),
-                reply_markup=build_available_request_result_inline_keyboard(
-                    group_idx=draft.group_idx or 0,
-                    contact_url=self._responsible_contact_url(),
-                ),
-            )
-
-    async def _show_available_request_calendar(self, *, guest_id: str, telegram_user_id: int, query) -> None:
-        session = await self._deps.sessions.get(telegram_user_id)
-        draft = session.available_request
-        if draft is None or draft.month_cursor is None:
-            await query.answer()
-            return
-
-        context = await self._resolve_available_context(
-            guest_id=guest_id,
-            telegram_user_id=telegram_user_id,
-            group_idx=draft.group_idx,
-            category_idx=draft.category_idx,
-        )
-        if context is None:
-            await query.answer()
-            return
-        category_name, _ = context
-
-        await query.answer()
-        if query.message is not None:
-            await query.edit_message_text(
-                render_available_request_calendar_prompt(category_name=category_name),
-                reply_markup=build_available_request_calendar_inline_keyboard(
-                    month_cursor=draft.month_cursor,
-                    checkin=draft.checkin,
-                    checkout=draft.checkout,
-                    group_idx=draft.group_idx or 0,
-                ),
-            )
-
-    async def _show_available_request_tariff(self, *, guest_id: str, telegram_user_id: int, query) -> None:
-        session = await self._deps.sessions.get(telegram_user_id)
-        draft = session.available_request
-        if draft is None or draft.checkin is None or draft.checkout is None:
-            await query.answer()
-            return
-
-        context = await self._resolve_available_context(
-            guest_id=guest_id,
-            telegram_user_id=telegram_user_id,
-            group_idx=draft.group_idx,
-            category_idx=draft.category_idx,
-        )
-        if context is None:
-            await query.answer()
-            return
-        category_name, _ = context
-
-        await query.answer()
-        if query.message is not None:
-            await query.edit_message_text(
-                render_available_request_tariff_prompt(
-                    category_name=category_name,
-                    checkin=draft.checkin,
-                    checkout=draft.checkout,
-                ),
-                reply_markup=build_available_request_tariff_inline_keyboard(group_idx=draft.group_idx or 0),
-            )
-
-    async def _show_available_request_source_details(self, *, guest_id: str, telegram_user_id: int, query) -> None:
-        session = await self._deps.sessions.get(telegram_user_id)
-        draft = session.available_request
-        if draft is None or draft.group_idx is None or draft.category_idx is None or draft.source_period_idx is None:
-            await query.answer()
-            return
-        await self._show_available_period_details(
-            guest_id=guest_id,
-            telegram_user_id=telegram_user_id,
-            query=query,
-            group_idx_raw=str(draft.group_idx),
-            category_idx_raw=str(draft.category_idx),
-            period_idx_raw=str(draft.source_period_idx),
-            preserve_request=True,
-        )
-
-    async def _show_available_request_categories(self, *, guest_id: str, telegram_user_id: int, query, data: str) -> None:
-        session = await self._deps.sessions.get(telegram_user_id)
-        draft = session.available_request
-        group_idx_raw = data.split(":")[-1]
-        if draft is not None and draft.group_idx is not None:
-            group_idx_raw = str(draft.group_idx)
-        session.available_request = None
-        await self._show_available_group_categories(
-            guest_id=guest_id,
-            telegram_user_id=telegram_user_id,
-            query=query,
-            group_idx_raw=group_idx_raw,
+            month_cursor=source_period.display_start.replace(day=1),
+            quote_group_ids=group_ids,
+            source_group_idx=group_idx,
+            source_category_idx=category_idx,
+            source_period_idx=period_idx,
         )
 
     async def _resolve_available_context(
@@ -873,56 +637,6 @@ class AvailableOffersScenario:
         session.available_category_names = list(categories)
         return category_name, rows
 
-    def _resolve_available_request_quote_summary(
-        self,
-        *,
-        guest_id: str,
-        category_name: str,
-        period_start: date,
-        period_end: date,
-        tariff: str,
-        rows: list,
-    ) -> tuple[int | None, int | None, str | None, list[tuple[date, date, str]]]:
-        group_ids = {row.group_id for row in rows if getattr(row, "group_id", None)}
-        _, quotes = self._deps.period_quotes.get_period_quotes(
-            guest_id=guest_id,
-            period_start=period_start,
-            period_end=period_end,
-            group_ids=group_ids or None,
-        )
-        matching_quotes = [
-            quote
-            for quote in quotes
-            if quote.category_name == category_name and quote.tariff.strip().lower() == tariff
-        ]
-        if not matching_quotes:
-            return None, None, None, []
-
-        open_price_minor = sum(quote.total_old_minor for quote in matching_quotes)
-        preliminary_price_minor = sum(quote.total_new_minor for quote in matching_quotes)
-        loyalty_status = next((quote.loyalty_status for quote in matching_quotes if quote.loyalty_status), None)
-
-        special_offers: list[tuple[date, date, str]] = []
-        seen_offers: set[tuple[date, date, str]] = set()
-        for quote in matching_quotes:
-            if not quote.offer_title:
-                continue
-            offer_key = (quote.applied_from, quote.applied_to, quote.offer_title)
-            if offer_key in seen_offers:
-                continue
-            seen_offers.add(offer_key)
-            special_offers.append(offer_key)
-
-        return open_price_minor, preliminary_price_minor, loyalty_status, special_offers
-
-    async def _send_available_request_to_admin(self, *, guest_id: str, telegram_user_id: int, query) -> None:
-        await query.answer("??????? ?????????????? ?? ????????.", show_alert=True)
-
-    def _responsible_contact_url(self) -> str | None:
-        if self._deps.admin_telegram_id is None:
-            return None
-        return f"tg://user?id={self._deps.admin_telegram_id}"
-
     def _available_groups_for_guest(self, *, guest_id: str):
         category_groups = self._deps.available_offers.get_available_categories_with_groups(guest_id=guest_id)
         return build_available_groups(category_groups=category_groups)
@@ -940,4 +654,48 @@ def _parse_three_indices(first: str, second: str, third: str) -> tuple[int, int,
         return int(first), int(second), int(third)
     except ValueError:
         return None
+
+
+class _AvailableInterestRequestAdapter:
+    calendar_parent_back_text = "\u041d\u0430\u0437\u0430\u0434 \u043a \u043a\u0430\u0442\u0435\u0433\u043e\u0440\u0438\u044f\u043c"
+    result_parent_back_text = "\u041d\u0430\u0437\u0430\u0434 \u043a \u0432\u044b\u0431\u043e\u0440\u0443 \u043a\u0430\u0442\u0435\u0433\u043e\u0440\u0438\u0439"
+
+    def __init__(self, scenario: AvailableOffersScenario):
+        self._scenario = scenario
+
+    async def handle_missing_guest(self, *, telegram_user_id: int, query) -> None:
+        await self._scenario._deps.flow_guard.leave(telegram_user_id)
+        await query.answer()
+        if query.message is not None:
+            await query.message.reply_text(msg("auth_required"), reply_markup=build_phone_request_keyboard())
+
+    async def resolve_start_context(
+        self,
+        *,
+        guest_id: str,
+        telegram_user_id: int,
+        data: str,
+    ) -> InterestRequestStartContext | None:
+        return await self._scenario._resolve_available_interest_start_context(
+            guest_id=guest_id,
+            telegram_user_id=telegram_user_id,
+            data=data,
+        )
+
+    async def show_source_screen(self, *, guest_id: str, telegram_user_id: int, query, draft) -> None:
+        await self._scenario._show_interest_request_source_details(
+            guest_id=guest_id,
+            telegram_user_id=telegram_user_id,
+            query=query,
+        )
+
+    async def show_parent_screen(self, *, guest_id: str, telegram_user_id: int, query, draft) -> None:
+        await self._scenario._show_interest_request_categories(
+            guest_id=guest_id,
+            telegram_user_id=telegram_user_id,
+            query=query,
+        )
+
+
+
 

@@ -6,6 +6,11 @@ from decimal import Decimal
 from typing import NamedTuple
 
 from src.application.dto.matched_date_record import MatchedDateRecord
+from src.presentation.telegram.presenters.interest_request_presenter import (
+    render_interest_request_calendar_prompt,
+    render_interest_request_message,
+    render_interest_request_tariff_prompt,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -159,50 +164,19 @@ def render_available_interest_message(
     loyalty_status: str | None,
     special_offers: list[tuple[date, date, str]],
 ) -> str:
-    guest_lines = [f"Взрослые: {adults}"]
-    if children_4_13 > 0:
-        guest_lines.append(f"Дети (4–13 лет): {children_4_13}")
-    if infants_0_3 > 0:
-        guest_lines.append(f"Дети (0–3 лет): {infants_0_3}")
-
-    discount_lines: list[str] = []
-    if loyalty_status:
-        discount_lines.append(f"статус в пл: {loyalty_status.lower()}")
-    for offer_start, offer_end, offer_title in special_offers:
-        discount_lines.append(
-            f'спецпредложение: {format_date(offer_start)} – {format_date(offer_end)} "{offer_title}"'
-        )
-
-    open_price_line = (
-        f"Открытая цена: {format_rub(open_price_minor)}"
-        if open_price_minor is not None
-        else "Открытая цена: не удалось рассчитать"
+    return render_interest_request_message(
+        category_name=category_name,
+        period_start=period_start,
+        period_end=period_end,
+        tariff_name=tariff_label,
+        open_price_minor=open_price_minor,
+        preliminary_price_minor=preliminary_price_minor,
+        adults=adults,
+        children_4_13=children_4_13,
+        infants_0_3=infants_0_3,
+        loyalty_status=loyalty_status,
+        special_offers=special_offers,
     )
-    preliminary_price_line = (
-        f"Предварительная стоимость: {format_rub(preliminary_price_minor)}"
-        if preliminary_price_minor is not None
-        else "Предварительная стоимость: не удалось рассчитать"
-    )
-
-    lines = [
-        f"Здравствуйте! Меня заинтересовала категория «{category_name}».",
-        "",
-        "Хочу уточнить возможность бронирования:",
-        f"Период: {format_date(period_start)} – {format_date(period_end)}",
-        f"Тариф: {tariff_label}",
-        "",
-        open_price_line,
-        "",
-        preliminary_price_line,
-        "",
-        "Гости:",
-        *guest_lines,
-    ]
-    if discount_lines:
-        lines.extend(["", "Скидки:", *discount_lines])
-    lines.extend(["", "Подскажите, пожалуйста, доступность и условия бронирования."])
-    return "\n".join(lines)
-
 
 
 def render_available_request_text(
@@ -363,4 +337,5 @@ def _group_bucket_label(*, group_id: str, category_name: str) -> str:
 def _tariff_sort_keys(keys) -> list[str]:
     order = {"breakfast": 0, "fullpansion": 1}
     return sorted(keys, key=lambda key: (order.get(key, 100), key))
+
 

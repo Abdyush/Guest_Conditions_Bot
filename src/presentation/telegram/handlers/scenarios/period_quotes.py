@@ -5,6 +5,10 @@ from datetime import date
 
 from src.presentation.telegram.handlers.dependencies import TelegramHandlersDependencies
 from src.presentation.telegram.handlers.shared.navigation import send_main_menu_for_guest
+from src.presentation.telegram.handlers.subflows.interest_request import (
+    InterestRequestStartContext,
+    InterestRequestSubflow,
+)
 from src.presentation.telegram.keyboards.main_menu import PERIOD_QUOTES_BUTTON, build_phone_request_keyboard
 from src.presentation.telegram.keyboards.period_quotes import (
     build_period_quotes_calendar_inline_keyboard,
@@ -36,6 +40,10 @@ logger = logging.getLogger(__name__)
 class PeriodQuotesScenario:
     def __init__(self, *, deps: TelegramHandlersDependencies):
         self._deps = deps
+        self._interest_request = InterestRequestSubflow(
+            deps=deps,
+            adapter=_PeriodQuotesInterestRequestAdapter(self),
+        )
 
     async def open_group_picker(self, *, telegram_user_id: int, message) -> None:
         guest_id = self._deps.identity.resolve_guest_id(telegram_user_id=telegram_user_id)
@@ -53,6 +61,7 @@ class PeriodQuotesScenario:
             checkin=None,
             checkout=None,
         )
+        session.interest_request = None
         await self._deps.flow_guard.enter(telegram_user_id, ActiveFlow.PERIOD_QUOTES)
         await message.reply_text(
             "Сценарий «Цены на период» открыт. Для выхода используйте кнопку «Главное меню» ниже.",
@@ -106,6 +115,7 @@ class PeriodQuotesScenario:
 
         draft.group_id = group_id
         draft.category_names = category_names
+        session.interest_request = None
         session.state = ConversationState.AWAIT_QUOTES_CATEGORY
         await query.answer()
         if query.message is not None:
@@ -296,12 +306,20 @@ class PeriodQuotesScenario:
             category_idx=category_idx,
         )
 
+    async def handle_interest_request_callback(self, telegram_user_id: int, query, data: str) -> None:
+        await self._interest_request.handle_callback(
+            telegram_user_id=telegram_user_id,
+            query=query,
+            data=data,
+        )
+
     async def handle_nav_back_group(self, telegram_user_id: int, query) -> None:
         await query.answer()
         session = await self._deps.sessions.get(telegram_user_id)
         draft = session.period_quotes
         if draft is None or draft.month_cursor is None:
             return
+        session.interest_request = None
         session.state = ConversationState.AWAIT_QUOTES_CALENDAR
         if draft.checkin is not None:
             draft.month_cursor = draft.checkin.replace(day=1)
@@ -328,6 +346,7 @@ class PeriodQuotesScenario:
         draft = session.period_quotes
         if draft is None or draft.checkin is None or draft.checkout is None:
             return
+        session.interest_request = None
         session.state = ConversationState.AWAIT_QUOTES_GROUP
         draft.group_id = None
         draft.category_names = None
@@ -357,6 +376,7 @@ class PeriodQuotesScenario:
         if session.state == ConversationState.AWAIT_QUOTES_CATEGORY:
             draft = session.period_quotes
             if draft is not None and draft.checkin is not None and draft.checkout is not None:
+                session.interest_request = None
                 session.state = ConversationState.AWAIT_QUOTES_GROUP
                 draft.group_id = None
                 draft.category_names = None
@@ -369,6 +389,7 @@ class PeriodQuotesScenario:
         if session.state == ConversationState.AWAIT_QUOTES_GROUP:
             draft = session.period_quotes
             if draft is not None and draft.month_cursor is not None:
+                session.interest_request = None
                 session.state = ConversationState.AWAIT_QUOTES_CALENDAR
                 if draft.checkin is not None:
                     draft.month_cursor = draft.checkin.replace(day=1)
@@ -446,6 +467,7 @@ class PeriodQuotesScenario:
         draft.quotes = quotes
         draft.last_room_dates_by_category = last_room_dates_by_category
         draft.category_names = None
+        session.interest_request = None
         session.state = ConversationState.AWAIT_QUOTES_GROUP
 
         if query.message is None:
@@ -501,9 +523,64 @@ class PeriodQuotesScenario:
                 ),
                 reply_markup=build_period_quotes_result_inline_keyboard(
                     category_idx=category_idx,
+                    interest_callback_data=f"avreq:start:quotes:{category_idx}",
                     has_offer_text=has_offer_text,
                 ),
             )
+
+    async def _show_interest_request_source_result(self, *, guest_id: str, telegram_user_id: int, query, category_idx: int) -> None:
+        await self._show_category_result(
+            guest_id=guest_id,
+            telegram_user_id=telegram_user_id,
+            query=query,
+            category_idx=category_idx,
+        )
+
+    async def _show_interest_request_categories(self, *, telegram_user_id: int, query) -> None:
+        session = await self._deps.sessions.get(telegram_user_id)
+        draft = session.period_quotes
+        if draft is None or draft.checkin is None or draft.checkout is None:
+            await query.answer()
+            return
+        session.state = ConversationState.AWAIT_QUOTES_CATEGORY
+        if query.message is not None:
+            await query.answer()
+            await query.edit_message_text(
+                render_period_quotes_category_prompt(period_start=draft.checkin, period_end=draft.checkout),
+                reply_markup=build_period_quotes_categories_inline_keyboard(category_names=draft.category_names or []),
+            )
+
+    async def _resolve_interest_request_start_context(
+        self,
+        *,
+        telegram_user_id: int,
+        data: str,
+    ) -> InterestRequestStartContext | None:
+        parts = data.split(":")
+        if len(parts) != 4 or parts[2] != "quotes":
+            return None
+        try:
+            category_idx = int(parts[3])
+        except ValueError:
+            return None
+
+        session = await self._deps.sessions.get(telegram_user_id)
+        draft = session.period_quotes
+        if draft is None or draft.group_id is None or draft.checkin is None or draft.checkout is None:
+            return None
+
+        category_names = draft.category_names or []
+        if category_idx < 0 or category_idx >= len(category_names):
+            return None
+
+        return InterestRequestStartContext(
+            source_kind="quotes",
+            category_name=category_names[category_idx],
+            month_cursor=draft.checkin.replace(day=1),
+            quote_group_ids=[draft.group_id],
+            source_group_id=draft.group_id,
+            source_category_idx=category_idx,
+        )
 
     @staticmethod
     def _available_group_ids_from_quotes(quotes) -> list[str]:
@@ -512,3 +589,47 @@ class PeriodQuotesScenario:
     @staticmethod
     def _category_names_for_group(*, quotes, group_id: str) -> list[str]:
         return sorted({item.category_name for item in quotes if item.group_id == group_id})
+
+
+class _PeriodQuotesInterestRequestAdapter:
+    calendar_parent_back_text = "\u041d\u0430\u0437\u0430\u0434 \u043a \u043a\u0430\u0442\u0435\u0433\u043e\u0440\u0438\u044f\u043c"
+    result_parent_back_text = "\u041d\u0430\u0437\u0430\u0434 \u043a \u043a\u0430\u0442\u0435\u0433\u043e\u0440\u0438\u044f\u043c"
+
+    def __init__(self, scenario: PeriodQuotesScenario):
+        self._scenario = scenario
+
+    async def handle_missing_guest(self, *, telegram_user_id: int, query) -> None:
+        await self._scenario._deps.flow_guard.leave(telegram_user_id)
+        await self._scenario._deps.sessions.set_state(telegram_user_id, ConversationState.AWAIT_PHONE_CONTACT)
+        await query.answer()
+        if query.message is not None:
+            await query.message.reply_text(msg("auth_required"), reply_markup=build_phone_request_keyboard())
+
+    async def resolve_start_context(
+        self,
+        *,
+        guest_id: str,
+        telegram_user_id: int,
+        data: str,
+    ) -> InterestRequestStartContext | None:
+        return await self._scenario._resolve_interest_request_start_context(
+            telegram_user_id=telegram_user_id,
+            data=data,
+        )
+
+    async def show_source_screen(self, *, guest_id: str, telegram_user_id: int, query, draft) -> None:
+        if draft.source_category_idx is None:
+            await query.answer()
+            return
+        await self._scenario._show_interest_request_source_result(
+            guest_id=guest_id,
+            telegram_user_id=telegram_user_id,
+            query=query,
+            category_idx=draft.source_category_idx,
+        )
+
+    async def show_parent_screen(self, *, guest_id: str, telegram_user_id: int, query, draft) -> None:
+        await self._scenario._show_interest_request_categories(
+            telegram_user_id=telegram_user_id,
+            query=query,
+        )

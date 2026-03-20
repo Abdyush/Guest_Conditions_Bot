@@ -4,6 +4,10 @@ import logging
 
 from src.presentation.telegram.handlers.dependencies import TelegramHandlersDependencies
 from src.presentation.telegram.handlers.shared.navigation import send_main_menu_for_guest
+from src.presentation.telegram.handlers.subflows.interest_request import (
+    InterestRequestStartContext,
+    InterestRequestSubflow,
+)
 from src.presentation.telegram.keyboards.best_periods import (
     build_best_categories_inline_keyboard,
     build_best_groups_inline_keyboard,
@@ -32,6 +36,10 @@ logger = logging.getLogger(__name__)
 class BestPeriodsScenario:
     def __init__(self, *, deps: TelegramHandlersDependencies):
         self._deps = deps
+        self._interest_request = InterestRequestSubflow(
+            deps=deps,
+            adapter=_BestPeriodsInterestRequestAdapter(self),
+        )
 
     async def open_group_picker(self, *, telegram_user_id: int, message) -> None:
         guest_id = self._deps.identity.resolve_guest_id(telegram_user_id=telegram_user_id)
@@ -44,6 +52,7 @@ class BestPeriodsScenario:
         session = await self._deps.sessions.get(telegram_user_id)
         session.state = ConversationState.AWAIT_BEST_GROUP_ID
         session.best_period = None
+        session.interest_request = None
         await self._deps.flow_guard.enter(telegram_user_id, ActiveFlow.BEST_PERIODS)
         await message.reply_text(
             "Сценарий «Самый выгодный период» открыт. Для выхода используйте кнопку «Главное меню» ниже.",
@@ -93,6 +102,7 @@ class BestPeriodsScenario:
         session = await self._deps.sessions.get(telegram_user_id)
         session.state = ConversationState.AWAIT_BEST_CATEGORY_ID
         session.best_period = BestPeriodDraft(group_id=group_id, category_names=category_names)
+        session.interest_request = None
 
         await query.answer()
         if query.message is not None:
@@ -200,11 +210,19 @@ class BestPeriodsScenario:
             category_idx=category_idx,
         )
 
+    async def handle_interest_request_callback(self, telegram_user_id: int, query, data: str) -> None:
+        await self._interest_request.handle_callback(
+            telegram_user_id=telegram_user_id,
+            query=query,
+            data=data,
+        )
+
     async def handle_nav_back_groups(self, telegram_user_id: int, query) -> None:
         await query.answer()
         session = await self._deps.sessions.get(telegram_user_id)
         session.state = ConversationState.AWAIT_BEST_GROUP_ID
         session.best_period = None
+        session.interest_request = None
         if query.message is not None:
             await query.edit_message_text(
                 render_best_groups_prompt(),
@@ -217,6 +235,7 @@ class BestPeriodsScenario:
         draft = session.best_period
         if draft is None:
             return
+        session.interest_request = None
         session.state = ConversationState.AWAIT_BEST_CATEGORY_ID
         if query.message is not None:
             await query.edit_message_text(
@@ -227,6 +246,7 @@ class BestPeriodsScenario:
     async def handle_back(self, telegram_user_id: int, message, guest_id: str) -> bool:
         session = await self._deps.sessions.get(telegram_user_id)
         if session.state == ConversationState.AWAIT_BEST_CATEGORY_ID:
+            session.interest_request = None
             session.state = ConversationState.AWAIT_BEST_GROUP_ID
             session.best_period = None
             await message.reply_text(
@@ -279,9 +299,76 @@ class BestPeriodsScenario:
                 ),
                 reply_markup=build_best_period_result_inline_keyboard(
                     category_idx=category_idx,
+                    interest_callback_data=f"avreq:start:best:{category_idx}",
                     has_offer_text=has_offer_text,
                 ),
             )
+
+    async def _show_interest_request_source_result(self, *, guest_id: str, telegram_user_id: int, query, category_idx: int) -> None:
+        await self._show_best_period_result(
+            guest_id=guest_id,
+            telegram_user_id=telegram_user_id,
+            query=query,
+            category_idx=category_idx,
+        )
+
+    async def _show_interest_request_categories(self, *, telegram_user_id: int, query) -> None:
+        session = await self._deps.sessions.get(telegram_user_id)
+        draft = session.best_period
+        if draft is None:
+            await query.answer()
+            return
+        session.state = ConversationState.AWAIT_BEST_CATEGORY_ID
+        await query.answer()
+        if query.message is not None:
+            await query.edit_message_text(
+                render_best_categories_prompt(),
+                reply_markup=build_best_categories_inline_keyboard(category_names=draft.category_names or []),
+            )
+
+    async def _resolve_interest_request_start_context(
+        self,
+        *,
+        telegram_user_id: int,
+        data: str,
+    ) -> InterestRequestStartContext | None:
+        parts = data.split(":")
+        if len(parts) != 4 or parts[2] != "best":
+            return None
+        try:
+            category_idx = int(parts[3])
+        except ValueError:
+            return None
+
+        session = await self._deps.sessions.get(telegram_user_id)
+        draft = session.best_period
+        if draft is None or draft.group_id is None:
+            return None
+
+        category_names = draft.category_names or []
+        if category_idx < 0 or category_idx >= len(category_names):
+            return None
+
+        guest_id = self._deps.identity.resolve_guest_id(telegram_user_id=telegram_user_id)
+        if not guest_id:
+            return None
+        result = await self._resolve_best_period_result(
+            guest_id=guest_id,
+            telegram_user_id=telegram_user_id,
+            category_idx=category_idx,
+        )
+        if result is None:
+            return None
+        _, best_pick, _ = result
+
+        return InterestRequestStartContext(
+            source_kind="best",
+            category_name=category_names[category_idx],
+            month_cursor=best_pick.start_date.replace(day=1),
+            quote_group_ids=[draft.group_id],
+            source_group_id=draft.group_id,
+            source_category_idx=category_idx,
+        )
 
     async def _resolve_best_period_result(
         self,
@@ -312,5 +399,49 @@ class BestPeriodsScenario:
         if best_pick is None:
             return None
         return category_name, best_pick, quotes
+
+
+class _BestPeriodsInterestRequestAdapter:
+    calendar_parent_back_text = "\u041d\u0430\u0437\u0430\u0434 \u043a \u043a\u0430\u0442\u0435\u0433\u043e\u0440\u0438\u044f\u043c"
+    result_parent_back_text = "\u041d\u0430\u0437\u0430\u0434 \u043a \u043a\u0430\u0442\u0435\u0433\u043e\u0440\u0438\u044f\u043c"
+
+    def __init__(self, scenario: BestPeriodsScenario):
+        self._scenario = scenario
+
+    async def handle_missing_guest(self, *, telegram_user_id: int, query) -> None:
+        await self._scenario._deps.flow_guard.leave(telegram_user_id)
+        await self._scenario._deps.sessions.set_state(telegram_user_id, ConversationState.AWAIT_PHONE_CONTACT)
+        await query.answer()
+        if query.message is not None:
+            await query.message.reply_text(msg("auth_required"), reply_markup=build_phone_request_keyboard())
+
+    async def resolve_start_context(
+        self,
+        *,
+        guest_id: str,
+        telegram_user_id: int,
+        data: str,
+    ) -> InterestRequestStartContext | None:
+        return await self._scenario._resolve_interest_request_start_context(
+            telegram_user_id=telegram_user_id,
+            data=data,
+        )
+
+    async def show_source_screen(self, *, guest_id: str, telegram_user_id: int, query, draft) -> None:
+        if draft.source_category_idx is None:
+            await query.answer()
+            return
+        await self._scenario._show_interest_request_source_result(
+            guest_id=guest_id,
+            telegram_user_id=telegram_user_id,
+            query=query,
+            category_idx=draft.source_category_idx,
+        )
+
+    async def show_parent_screen(self, *, guest_id: str, telegram_user_id: int, query, draft) -> None:
+        await self._scenario._show_interest_request_categories(
+            telegram_user_id=telegram_user_id,
+            query=query,
+        )
 
 

@@ -46,10 +46,14 @@ class BestPeriodDraft:
 
 
 @dataclass(slots=True)
-class AvailableRequestDraft:
-    group_idx: int | None = None
-    category_idx: int | None = None
+class InterestRequestDraft:
+    source_kind: str | None = None
+    category_name: str | None = None
+    source_group_id: str | None = None
+    source_group_idx: int | None = None
+    source_category_idx: int | None = None
     source_period_idx: int | None = None
+    quote_group_ids: list[str] | None = None
     month_cursor: date | None = None
     checkin: date | None = None
     checkout: date | None = None
@@ -66,7 +70,7 @@ class UserSession:
     period_quotes: PeriodQuotesDraft | None = None
     available_category_names: list[str] | None = None
     available_category_rows: list | None = None
-    available_request: AvailableRequestDraft | None = None
+    interest_request: InterestRequestDraft | None = None
 
 
 class InMemorySessionStore:
@@ -96,7 +100,7 @@ class InMemorySessionStore:
             period_quotes=self._deserialize_period_quotes(data.get("period_quotes")),
             available_category_names=self._deserialize_available_category_names(data.get("available_category_names")),
             available_category_rows=None,
-            available_request=self._deserialize_available_request(data.get("available_request")),
+            interest_request=self._deserialize_interest_request(data.get("interest_request") or data.get("available_request")),
         )
         self._cache[telegram_user_id] = session
         return session
@@ -126,7 +130,7 @@ class InMemorySessionStore:
                 "best_period": self._serialize_best_period(session.best_period),
                 "period_quotes": self._serialize_period_quotes(session.period_quotes),
                 "available_category_names": self._serialize_available_category_names(session.available_category_names),
-                "available_request": self._serialize_available_request(session.available_request),
+                "interest_request": self._serialize_interest_request(session.interest_request),
             },
         )
 
@@ -246,13 +250,17 @@ class InMemorySessionStore:
         return list(value)
 
     @staticmethod
-    def _serialize_available_request(draft: AvailableRequestDraft | None) -> dict | None:
+    def _serialize_interest_request(draft: InterestRequestDraft | None) -> dict | None:
         if draft is None:
             return None
         return {
-            "group_idx": draft.group_idx,
-            "category_idx": draft.category_idx,
+            "source_kind": draft.source_kind,
+            "category_name": draft.category_name,
+            "source_group_id": draft.source_group_id,
+            "source_group_idx": draft.source_group_idx,
+            "source_category_idx": draft.source_category_idx,
             "source_period_idx": draft.source_period_idx,
+            "quote_group_ids": list(draft.quote_group_ids) if draft.quote_group_ids is not None else None,
             "month_cursor": draft.month_cursor.isoformat() if draft.month_cursor else None,
             "checkin": draft.checkin.isoformat() if draft.checkin else None,
             "checkout": draft.checkout.isoformat() if draft.checkout else None,
@@ -261,13 +269,17 @@ class InMemorySessionStore:
         }
 
     @staticmethod
-    def _deserialize_available_request(payload) -> AvailableRequestDraft | None:
+    def _deserialize_interest_request(payload) -> InterestRequestDraft | None:
         if not payload:
             return None
-        return AvailableRequestDraft(
-            group_idx=payload.get("group_idx"),
-            category_idx=payload.get("category_idx"),
+        return InterestRequestDraft(
+            source_kind=payload.get("source_kind"),
+            category_name=payload.get("category_name"),
+            source_group_id=payload.get("source_group_id"),
+            source_group_idx=payload.get("source_group_idx", payload.get("group_idx")),
+            source_category_idx=payload.get("source_category_idx", payload.get("category_idx")),
             source_period_idx=payload.get("source_period_idx"),
+            quote_group_ids=list(payload["quote_group_ids"]) if payload.get("quote_group_ids") is not None else None,
             month_cursor=date.fromisoformat(payload["month_cursor"]) if payload.get("month_cursor") else None,
             checkin=date.fromisoformat(payload["checkin"]) if payload.get("checkin") else None,
             checkout=date.fromisoformat(payload["checkout"]) if payload.get("checkout") else None,

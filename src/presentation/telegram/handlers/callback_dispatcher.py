@@ -17,7 +17,7 @@ from src.presentation.telegram.callbacks.data_parser import (
     PREFIX_AVAILABLE_CATEGORY,
     PREFIX_AVAILABLE_OFFER,
     PREFIX_AVAILABLE_PERIOD,
-    PREFIX_AVAILABLE_REQUEST,
+    PREFIX_INTEREST_REQUEST,
     PREFIX_BEST_CATEGORY,
     PREFIX_BEST_GROUP,
     PREFIX_EDIT_BANK,
@@ -208,11 +208,17 @@ class TelegramCallbackDispatcher:
                 return True
             await self._scenarios.available_offers.handle_available_category_callback(user_id, query, data)
             return True
-        if data.startswith(PREFIX_AVAILABLE_REQUEST):
-            if active_flow != ActiveFlow.AVAILABLE_ROOMS:
-                await query.answer()
+        if data.startswith(PREFIX_INTEREST_REQUEST):
+            if active_flow == ActiveFlow.AVAILABLE_ROOMS:
+                await self._scenarios.available_offers.handle_interest_request_callback(user_id, query, data)
                 return True
-            await self._scenarios.available_offers.handle_available_request_callback(user_id, query, data)
+            if active_flow == ActiveFlow.PERIOD_QUOTES:
+                await self._scenarios.period_quotes.handle_interest_request_callback(user_id, query, data)
+                return True
+            if active_flow == ActiveFlow.BEST_PERIODS:
+                await self._scenarios.best_periods.handle_interest_request_callback(user_id, query, data)
+                return True
+            await query.answer()
             return True
         if data.startswith(PREFIX_AVAILABLE_PERIOD):
             if active_flow != ActiveFlow.AVAILABLE_ROOMS:
@@ -280,7 +286,7 @@ class TelegramCallbackDispatcher:
         return data == NAV_BACK_AVAILABLE_CATEGORIES or data.startswith(
             (
                 PREFIX_AVAILABLE_CATEGORY,
-                PREFIX_AVAILABLE_REQUEST,
+                PREFIX_INTEREST_REQUEST,
                 PREFIX_AVAILABLE_PERIOD,
                 PREFIX_AVAILABLE_OFFER,
             )
@@ -302,6 +308,7 @@ class TelegramCallbackDispatcher:
             NAV_BACK_QUOTES_CATEGORIES,
         } or data.startswith(
             (
+                PREFIX_INTEREST_REQUEST,
                 PREFIX_QUOTES_GROUP,
                 PREFIX_CALENDAR,
                 PREFIX_QUOTES_CATEGORY,
@@ -317,6 +324,7 @@ class TelegramCallbackDispatcher:
             NAV_BACK_BEST_CATEGORIES,
         } or data.startswith(
             (
+                PREFIX_INTEREST_REQUEST,
                 PREFIX_BEST_GROUP,
                 PREFIX_BEST_CATEGORY,
                 PREFIX_BEST_OFFER,

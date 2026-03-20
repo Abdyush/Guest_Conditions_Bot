@@ -1,14 +1,14 @@
 ﻿from __future__ import annotations
 
-from datetime import date
-
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
 
-from src.presentation.telegram.keyboards.calendar_picker import build_period_calendar_keyboard
+from src.presentation.telegram.keyboards.interest_request import (
+    AVREQ_CONTACT_UNAVAILABLE,
+    build_interest_request_calendar_inline_keyboard,
+    build_interest_request_result_inline_keyboard,
+    build_interest_request_tariff_inline_keyboard,
+)
 from src.presentation.telegram.keyboards.main_menu import MAIN_MENU_BUTTON
-
-
-AVREQ_CONTACT_UNAVAILABLE = "avreq:contact"
 
 
 def build_available_groups_inline_keyboard(*, group_names: list[str]) -> InlineKeyboardMarkup:
@@ -45,7 +45,7 @@ def build_available_period_details_inline_keyboard(
     has_offer_text: bool,
 ) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = [
-        [InlineKeyboardButton(text="Заинтересовало", callback_data=f"avreq:start:{group_idx}:{category_idx}:{period_idx}")]
+        [InlineKeyboardButton(text="Заинтересовало", callback_data=f"avreq:start:available:{group_idx}:{category_idx}:{period_idx}")]
     ]
     if has_offer_text:
         rows.append([InlineKeyboardButton(text="Текст специального предложения", callback_data=f"avoff:{group_idx}:{category_idx}:{period_idx}")])
@@ -65,48 +65,31 @@ def build_available_offer_text_inline_keyboard(*, group_idx: int, category_idx: 
 
 def build_available_request_calendar_inline_keyboard(
     *,
-    month_cursor: date,
-    checkin: date | None,
-    checkout: date | None,
+    month_cursor,
+    checkin,
+    checkout,
     group_idx: int,
 ) -> InlineKeyboardMarkup:
-    keyboard = build_period_calendar_keyboard(
+    return build_interest_request_calendar_inline_keyboard(
         month_cursor=month_cursor,
         checkin=checkin,
         checkout=checkout,
-        callback_prefix="avreq:cal",
+        parent_back_text="Назад к категориям",
     )
-    rows = [list(row) for row in keyboard.inline_keyboard]
-    rows.append([InlineKeyboardButton(text="Назад к предложению", callback_data="avreq:back:detail")])
-    rows.append([InlineKeyboardButton(text="Назад к категориям", callback_data=f"avreq:back:categories:{group_idx}")])
-    return InlineKeyboardMarkup(rows)
 
 
 
 def build_available_request_tariff_inline_keyboard(*, group_idx: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        [
-            [InlineKeyboardButton(text="Только завтраки", callback_data="avreq:tariff:breakfast")],
-            [InlineKeyboardButton(text="Полный пансион", callback_data="avreq:tariff:fullpansion")],
-            [InlineKeyboardButton(text="Назад к выбору периода", callback_data="avreq:back:calendar")],
-            [InlineKeyboardButton(text="Назад к выбору категорий", callback_data=f"avreq:back:categories:{group_idx}")],
-        ]
+    return build_interest_request_tariff_inline_keyboard(
+        parent_back_text="Назад к выбору категорий",
     )
 
 
 
 def build_available_request_result_inline_keyboard(*, group_idx: int, contact_url: str | None) -> InlineKeyboardMarkup:
-    contact_button = (
-        InlineKeyboardButton(text="Написать Никите", url=contact_url)
-        if contact_url
-        else InlineKeyboardButton(text="Написать Никите", callback_data=AVREQ_CONTACT_UNAVAILABLE)
-    )
-    return InlineKeyboardMarkup(
-        [
-            [contact_button],
-            [InlineKeyboardButton(text="Назад к выбору периода", callback_data="avreq:back:calendar")],
-            [InlineKeyboardButton(text="Назад к выбору категорий", callback_data=f"avreq:back:categories:{group_idx}")],
-        ]
+    return build_interest_request_result_inline_keyboard(
+        parent_back_text="Назад к выбору категорий",
+        contact_url=contact_url,
     )
 
 
