@@ -602,6 +602,7 @@ class AvailableOffersScenario:
         source_period = periods[period_idx]
         group_ids = sorted({row.group_id for row in rows if getattr(row, "group_id", None)})
         return InterestRequestStartContext(
+            period_mode="select",
             source_kind="available",
             category_name=category_name,
             month_cursor=source_period.display_start.replace(day=1),
@@ -691,6 +692,13 @@ class _AvailableInterestRequestAdapter:
 
     async def show_parent_screen(self, *, guest_id: str, telegram_user_id: int, query, draft) -> None:
         await self._scenario._show_interest_request_categories(
+            guest_id=guest_id,
+            telegram_user_id=telegram_user_id,
+            query=query,
+        )
+
+    async def show_period_screen(self, *, guest_id: str, telegram_user_id: int, query, draft) -> None:
+        await self._scenario._show_interest_request_source_details(
             guest_id=guest_id,
             telegram_user_id=telegram_user_id,
             query=query,

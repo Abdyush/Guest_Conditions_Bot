@@ -362,6 +362,7 @@ class BestPeriodsScenario:
         _, best_pick, _ = result
 
         return InterestRequestStartContext(
+            period_mode="select",
             source_kind="best",
             category_name=category_names[category_idx],
             month_cursor=best_pick.start_date.replace(day=1),
@@ -442,6 +443,14 @@ class _BestPeriodsInterestRequestAdapter:
         await self._scenario._show_interest_request_categories(
             telegram_user_id=telegram_user_id,
             query=query,
+        )
+
+    async def show_period_screen(self, *, guest_id: str, telegram_user_id: int, query, draft) -> None:
+        await self.show_source_screen(
+            guest_id=guest_id,
+            telegram_user_id=telegram_user_id,
+            query=query,
+            draft=draft,
         )
 
 

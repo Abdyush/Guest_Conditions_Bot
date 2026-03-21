@@ -47,6 +47,7 @@ class BestPeriodDraft:
 
 @dataclass(slots=True)
 class InterestRequestDraft:
+    period_mode: str = "select"
     source_kind: str | None = None
     category_name: str | None = None
     source_group_id: str | None = None
@@ -254,6 +255,7 @@ class InMemorySessionStore:
         if draft is None:
             return None
         return {
+            "period_mode": draft.period_mode,
             "source_kind": draft.source_kind,
             "category_name": draft.category_name,
             "source_group_id": draft.source_group_id,
@@ -273,6 +275,7 @@ class InMemorySessionStore:
         if not payload:
             return None
         return InterestRequestDraft(
+            period_mode=payload.get("period_mode", "select"),
             source_kind=payload.get("source_kind"),
             category_name=payload.get("category_name"),
             source_group_id=payload.get("source_group_id"),

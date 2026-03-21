@@ -27,6 +27,9 @@ class InterestRequestStartContext:
     source_kind: str
     category_name: str
     month_cursor: date
+    period_mode: str = "select"
+    checkin: date | None = None
+    checkout: date | None = None
     quote_group_ids: list[str] | None = None
     source_group_id: str | None = None
     source_group_idx: int | None = None
@@ -51,6 +54,8 @@ class InterestRequestParentAdapter(Protocol):
     async def show_source_screen(self, *, guest_id: str, telegram_user_id: int, query, draft: InterestRequestDraft) -> None: ...
 
     async def show_parent_screen(self, *, guest_id: str, telegram_user_id: int, query, draft: InterestRequestDraft | None) -> None: ...
+
+    async def show_period_screen(self, *, guest_id: str, telegram_user_id: int, query, draft: InterestRequestDraft | None) -> None: ...
 
 
 class InterestRequestSubflow:
@@ -89,9 +94,19 @@ class InterestRequestSubflow:
             )
             return
         if data == AVREQ_BACK_CALENDAR:
-            draft = await self._get_draft(telegram_user_id)
+            session = await self._deps.sessions.get(telegram_user_id)
+            draft = session.interest_request
             if draft is None:
                 await query.answer()
+                return
+            if draft.period_mode == "fixed":
+                session.interest_request = None
+                await self._adapter.show_period_screen(
+                    guest_id=guest_id,
+                    telegram_user_id=telegram_user_id,
+                    query=query,
+                    draft=draft,
+                )
                 return
             draft.checkin = None
             draft.checkout = None
@@ -123,6 +138,7 @@ class InterestRequestSubflow:
 
         session = await self._deps.sessions.get(telegram_user_id)
         session.interest_request = InterestRequestDraft(
+            period_mode=start_context.period_mode,
             source_kind=start_context.source_kind,
             category_name=start_context.category_name,
             source_group_id=start_context.source_group_id,
@@ -131,11 +147,14 @@ class InterestRequestSubflow:
             source_period_idx=start_context.source_period_idx,
             quote_group_ids=list(start_context.quote_group_ids) if start_context.quote_group_ids is not None else None,
             month_cursor=start_context.month_cursor,
-            checkin=None,
-            checkout=None,
+            checkin=start_context.checkin,
+            checkout=start_context.checkout,
             tariff=None,
             sent_to_admin=False,
         )
+        if start_context.period_mode == "fixed" and start_context.checkin is not None and start_context.checkout is not None:
+            await self._show_tariff(telegram_user_id=telegram_user_id, query=query)
+            return
         await self._show_calendar(telegram_user_id=telegram_user_id, query=query)
 
     async def _handle_calendar(self, *, telegram_user_id: int, query, data: str) -> None:

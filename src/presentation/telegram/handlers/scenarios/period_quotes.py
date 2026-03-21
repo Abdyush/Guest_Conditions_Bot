@@ -574,9 +574,12 @@ class PeriodQuotesScenario:
             return None
 
         return InterestRequestStartContext(
+            period_mode="fixed",
             source_kind="quotes",
             category_name=category_names[category_idx],
             month_cursor=draft.checkin.replace(day=1),
+            checkin=draft.checkin,
+            checkout=draft.checkout,
             quote_group_ids=[draft.group_id],
             source_group_id=draft.group_id,
             source_category_idx=category_idx,
@@ -633,3 +636,6 @@ class _PeriodQuotesInterestRequestAdapter:
             telegram_user_id=telegram_user_id,
             query=query,
         )
+
+    async def show_period_screen(self, *, guest_id: str, telegram_user_id: int, query, draft) -> None:
+        await self._scenario.handle_nav_back_group(telegram_user_id, query)
