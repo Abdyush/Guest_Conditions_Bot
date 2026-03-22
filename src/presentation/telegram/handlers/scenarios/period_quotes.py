@@ -181,7 +181,20 @@ class PeriodQuotesScenario:
             return
 
         if draft.checkout is None:
-            if picked <= draft.checkin:
+            if picked == draft.checkin:
+                draft.checkin = None
+                draft.checkout = None
+                await query.answer()
+                await query.edit_message_reply_markup(
+                    reply_markup=build_period_quotes_calendar_inline_keyboard(
+                        month_cursor=draft.month_cursor,
+                        checkin=draft.checkin,
+                        checkout=draft.checkout,
+                    )
+                )
+                return
+
+            if picked < draft.checkin:
                 draft.checkin = picked
                 draft.month_cursor = picked.replace(day=1)
                 await query.answer()

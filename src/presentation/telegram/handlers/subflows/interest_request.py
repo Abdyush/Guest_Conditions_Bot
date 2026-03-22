@@ -211,7 +211,22 @@ class InterestRequestSubflow:
             return
 
         if draft.checkout is None:
-            if picked <= draft.checkin:
+            if picked == draft.checkin:
+                draft.checkin = None
+                draft.checkout = None
+                await query.answer()
+                if query.message is not None:
+                    await query.edit_message_reply_markup(
+                        reply_markup=build_interest_request_calendar_inline_keyboard(
+                            month_cursor=draft.month_cursor,
+                            checkin=draft.checkin,
+                            checkout=draft.checkout,
+                            parent_back_text=self._adapter.calendar_parent_back_text,
+                        )
+                    )
+                return
+
+            if picked < draft.checkin:
                 draft.checkin = picked
                 draft.checkout = None
                 draft.month_cursor = picked.replace(day=1)
