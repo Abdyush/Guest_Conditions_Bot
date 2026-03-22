@@ -4,28 +4,40 @@ from decimal import Decimal, ROUND_HALF_UP
 from typing import Iterable
 
 from src.application.dto.period_quote import PeriodQuote
+from src.presentation.telegram.presenters.booking_period import format_booking_period, format_ui_date
 
 
 def render_period_quotes_groups_prompt() -> str:
-    return "Выберите группу категорий, чтобы посмотреть цены на нужный период."
+    return "\u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u0433\u0440\u0443\u043f\u043f\u0443 \u043a\u0430\u0442\u0435\u0433\u043e\u0440\u0438\u0439, \u0447\u0442\u043e\u0431\u044b \u043f\u043e\u0441\u043c\u043e\u0442\u0440\u0435\u0442\u044c \u0446\u0435\u043d\u044b \u043d\u0430 \u043d\u0443\u0436\u043d\u044b\u0439 \u043f\u0435\u0440\u0438\u043e\u0434."
 
 
 def render_period_quotes_calendar_prompt() -> str:
-    return "Выберите даты проживания: сначала дату заезда, затем дату выезда."
+    return "\u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u0434\u0430\u0442\u044b \u043f\u0440\u043e\u0436\u0438\u0432\u0430\u043d\u0438\u044f: \u0441\u043d\u0430\u0447\u0430\u043b\u0430 \u0434\u0430\u0442\u0443 \u0437\u0430\u0435\u0437\u0434\u0430, \u0437\u0430\u0442\u0435\u043c \u0434\u0430\u0442\u0443 \u0432\u044b\u0435\u0437\u0434\u0430."
 
 
 def render_period_quotes_category_prompt(*, period_start, period_end) -> str:
-    return f"Вы выбрали период: {format_date(period_start)} - {format_date(period_end)}.\nТеперь выберите категорию."
+    return (
+        f"\u0412\u044b \u0432\u044b\u0431\u0440\u0430\u043b\u0438 \u043f\u0435\u0440\u0438\u043e\u0434: "
+        f"{format_booking_period(start_date=period_start, end_date_inclusive=period_end, separator=' - ')}.\n"
+        "\u0422\u0435\u043f\u0435\u0440\u044c \u0432\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u043a\u0430\u0442\u0435\u0433\u043e\u0440\u0438\u044e."
+    )
 
 
 def render_period_quotes_flow_hint() -> str:
-    return "Сейчас открыт сценарий «Цены на период». Используйте кнопки этого сценария, календарь и кнопку «Главное меню»."
+    return (
+        "\u0421\u0435\u0439\u0447\u0430\u0441 \u043e\u0442\u043a\u0440\u044b\u0442 \u0441\u0446\u0435\u043d\u0430\u0440\u0438\u0439 "
+        "\u00ab\u0426\u0435\u043d\u044b \u043d\u0430 \u043f\u0435\u0440\u0438\u043e\u0434\u00bb. "
+        "\u0418\u0441\u043f\u043e\u043b\u044c\u0437\u0443\u0439\u0442\u0435 \u043a\u043d\u043e\u043f\u043a\u0438 \u044d\u0442\u043e\u0433\u043e \u0441\u0446\u0435\u043d\u0430\u0440\u0438\u044f, "
+        "\u043a\u0430\u043b\u0435\u043d\u0434\u0430\u0440\u044c \u0438 \u043a\u043d\u043e\u043f\u043a\u0443 \u00ab\u0413\u043b\u0430\u0432\u043d\u043e\u0435 \u043c\u0435\u043d\u044e\u00bb."
+    )
 
 
 def render_period_quotes_empty(*, period_start, period_end) -> str:
     return (
-        f"На период {format_date(period_start)} - {format_date(period_end)} сейчас нет подходящих вариантов.\n"
-        "Попробуйте выбрать другие даты."
+        f"\u041d\u0430 \u043f\u0435\u0440\u0438\u043e\u0434 "
+        f"{format_booking_period(start_date=period_start, end_date_inclusive=period_end, separator=' - ')} "
+        "\u0441\u0435\u0439\u0447\u0430\u0441 \u043d\u0435\u0442 \u043f\u043e\u0434\u0445\u043e\u0434\u044f\u0449\u0438\u0445 \u0432\u0430\u0440\u0438\u0430\u043d\u0442\u043e\u0432.\n"
+        "\u041f\u043e\u043f\u0440\u043e\u0431\u0443\u0439\u0442\u0435 \u0432\u044b\u0431\u0440\u0430\u0442\u044c \u0434\u0440\u0443\u0433\u0438\u0435 \u0434\u0430\u0442\u044b."
     )
 
 
@@ -39,7 +51,7 @@ def render_period_quote_card(
 ) -> str:
     lines = [
         category_name,
-        f"{format_date(period_start)} - {format_date(period_end)}",
+        format_booking_period(start_date=period_start, end_date_inclusive=period_end, separator=" - "),
         "",
     ]
 
@@ -49,24 +61,24 @@ def render_period_quote_card(
 
     discount_lines = _render_discount_lines(quotes)
     if discount_lines:
-        lines.append("Применённые скидки:")
+        lines.append("\u041f\u0440\u0438\u043c\u0435\u043d\u0451\u043d\u043d\u044b\u0435 \u0441\u043a\u0438\u0434\u043a\u0438:")
         lines.extend(discount_lines)
         lines.append("")
 
     if last_room_dates:
         formatted_dates = ", ".join(format_date(value) for value in sorted(set(last_room_dates)))
-        lines.append(f"Последние номера на даты: {formatted_dates}")
+        lines.append(f"\u041f\u043e\u0441\u043b\u0435\u0434\u043d\u0438\u0435 \u043d\u043e\u043c\u0435\u0440\u0430 \u043d\u0430 \u0434\u0430\u0442\u044b: {formatted_dates}")
 
     return "\n".join(line for line in lines if line is not None).strip()
 
 
 def render_period_quote_offer_text(*, offer_title: str | None, offer_text: str) -> str:
-    title = offer_title or "Специальное предложение"
-    return f"Специальное предложение: «{title}»\n\n{offer_text}".strip()
+    title = offer_title or "\u0421\u043f\u0435\u0446\u0438\u0430\u043b\u044c\u043d\u043e\u0435 \u043f\u0440\u0435\u0434\u043b\u043e\u0436\u0435\u043d\u0438\u0435"
+    return f"\u0421\u043f\u0435\u0446\u0438\u0430\u043b\u044c\u043d\u043e\u0435 \u043f\u0440\u0435\u0434\u043b\u043e\u0436\u0435\u043d\u0438\u0435: \u00ab{title}\u00bb\n\n{offer_text}".strip()
 
 
 def format_date(value) -> str:
-    return value.strftime("%d.%m.%y")
+    return format_ui_date(value)
 
 
 def _render_tariff_block(quote: PeriodQuote) -> list[str]:
@@ -74,14 +86,17 @@ def _render_tariff_block(quote: PeriodQuote) -> list[str]:
     new_per_night = _minor_per_night(quote.total_new_minor, quote.nights)
     benefit = old_per_night - new_per_night
 
-    lines = [f"Тариф: {tariff_label(quote.tariff)}"]
+    lines = [f"\u0422\u0430\u0440\u0438\u0444: {tariff_label(quote.tariff)}"]
     if quote.applied_from != quote.from_date or quote.applied_to != quote.to_date:
-        lines.append(f"Период действия тарифа: {format_date(quote.applied_from)} - {format_date(quote.applied_to)}")
+        lines.append(
+            f"\u041f\u0435\u0440\u0438\u043e\u0434 \u0434\u0435\u0439\u0441\u0442\u0432\u0438\u044f \u0442\u0430\u0440\u0438\u0444\u0430: "
+            f"{format_booking_period(start_date=quote.applied_from, end_date_inclusive=quote.applied_to, separator=' - ')}"
+        )
     lines.extend(
         [
-            f"Цена открытого рынка: {format_money(old_per_night)} ₽/сутки",
-            f"Ваша цена: {format_money(new_per_night)} ₽/сутки",
-            f"Ваша выгода: {format_money(benefit)} ₽/сутки",
+            f"\u0426\u0435\u043d\u0430 \u043e\u0442\u043a\u0440\u044b\u0442\u043e\u0433\u043e \u0440\u044b\u043d\u043a\u0430: {format_money(old_per_night)} \u20bd/\u0441\u0443\u0442\u043a\u0438",
+            f"\u0412\u0430\u0448\u0430 \u0446\u0435\u043d\u0430: {format_money(new_per_night)} \u20bd/\u0441\u0443\u0442\u043a\u0438",
+            f"\u0412\u0430\u0448\u0430 \u0432\u044b\u0433\u043e\u0434\u0430: {format_money(benefit)} \u20bd/\u0441\u0443\u0442\u043a\u0438",
         ]
     )
     return lines
@@ -92,20 +107,20 @@ def _render_discount_lines(quotes: Iterable[PeriodQuote]) -> list[str]:
     seen: set[str] = set()
     for quote in quotes:
         if quote.offer_title or quote.offer_repr:
-            label = f"• Специальное предложение: «{quote.offer_title or 'Без названия'}»"
+            label = f"\u2022 \u0421\u043f\u0435\u0446\u0438\u0430\u043b\u044c\u043d\u043e\u0435 \u043f\u0440\u0435\u0434\u043b\u043e\u0436\u0435\u043d\u0438\u0435: \u00ab{quote.offer_title or '\u0411\u0435\u0437 \u043d\u0430\u0437\u0432\u0430\u043d\u0438\u044f'}\u00bb"
             if quote.offer_repr:
                 label += f" - {quote.offer_repr}"
             if label not in seen:
                 lines.append(label)
                 seen.add(label)
         if quote.bank_status and quote.bank_percent:
-            label = f"• Статус в Сбере: {quote.bank_status} - {quote.bank_percent}"
+            label = f"\u2022 \u0421\u0442\u0430\u0442\u0443\u0441 \u0432 \u0421\u0431\u0435\u0440\u0435: {quote.bank_status} - {quote.bank_percent}"
             if label not in seen:
                 lines.append(label)
                 seen.add(label)
         elif quote.loyalty_status and quote.loyalty_percent:
             status = quote.loyalty_status.capitalize()
-            label = f"• Программа лояльности: {status} - {quote.loyalty_percent}"
+            label = f"\u2022 \u041f\u0440\u043e\u0433\u0440\u0430\u043c\u043c\u0430 \u043b\u043e\u044f\u043b\u044c\u043d\u043e\u0441\u0442\u0438: {status} - {quote.loyalty_percent}"
             if label not in seen:
                 lines.append(label)
                 seen.add(label)
@@ -128,9 +143,9 @@ def format_money(amount: Decimal) -> str:
 def tariff_label(value: str) -> str:
     normalized = value.strip().lower()
     if normalized == "breakfast":
-        return "Только завтраки"
+        return "\u0422\u043e\u043b\u044c\u043a\u043e \u0437\u0430\u0432\u0442\u0440\u0430\u043a\u0438"
     if normalized == "fullpansion":
-        return "Полный пансион"
+        return "\u041f\u043e\u043b\u043d\u044b\u0439 \u043f\u0430\u043d\u0441\u0438\u043e\u043d"
     return value
 
 

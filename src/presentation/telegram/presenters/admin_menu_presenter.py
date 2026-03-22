@@ -26,6 +26,14 @@ def render_admin_access_denied() -> str:
     return "Команда недоступна."
 
 
+def render_admin_main_reply_hint() -> str:
+    return "Доступна кнопка «Меню гостя»."
+
+
+def render_admin_submenu_reply_hint() -> str:
+    return "Используйте кнопки ниже для возврата или выхода."
+
+
 def render_system_attempt_result(*, title: str, attempt_started: bool, attempt_message: str) -> str:
     if not attempt_started and attempt_message.startswith("busy:"):
         return f"{title}: процесс уже выполняется."

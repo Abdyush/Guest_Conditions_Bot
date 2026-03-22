@@ -14,6 +14,7 @@ from src.presentation.telegram.keyboards.interest_request import (
     build_interest_request_result_inline_keyboard,
     build_interest_request_tariff_inline_keyboard,
 )
+from src.presentation.telegram.presenters.booking_period import booking_coverage_end
 from src.presentation.telegram.presenters.interest_request_presenter import (
     render_interest_request_calendar_prompt,
     render_interest_request_message,
@@ -335,7 +336,7 @@ class InterestRequestSubflow:
         _, quotes = self._deps.period_quotes.get_period_quotes(
             guest_id=guest_id,
             period_start=period_start,
-            period_end=period_end,
+            period_end=booking_coverage_end(period_end),
             group_ids=set(quote_group_ids) if quote_group_ids else None,
         )
         matching_quotes = [

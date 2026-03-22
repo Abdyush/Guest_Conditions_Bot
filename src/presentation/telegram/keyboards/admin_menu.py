@@ -18,11 +18,11 @@ from src.presentation.telegram.callbacks.data_parser import (
     ADMIN_SYSTEM_RATES,
     ADMIN_SYSTEM_RECALC,
 )
-from src.presentation.telegram.keyboards.main_menu import MAIN_MENU_BUTTON
 
 
 ADMIN_MENU_COMMAND = "/admin_menu"
 ADMIN_MENU_TITLE_BUTTON = "Меню администратора"
+ADMIN_GUEST_MENU_BUTTON = "Меню гостя"
 ADMIN_SYSTEM_BUTTON = "Система"
 ADMIN_REPORTS_BUTTON = "Отчеты"
 ADMIN_STATISTICS_BUTTON = "Статистика"
@@ -43,7 +43,7 @@ ADMIN_STATS_BLOCKED_BUTTON = "Сколько заблокировало бота
 def build_admin_main_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text=MAIN_MENU_BUTTON)],
+            [KeyboardButton(text=ADMIN_GUEST_MENU_BUTTON)],
         ],
         resize_keyboard=True,
     )
@@ -53,7 +53,7 @@ def build_admin_system_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text=ADMIN_BACK_BUTTON)],
-            [KeyboardButton(text=MAIN_MENU_BUTTON)],
+            [KeyboardButton(text=ADMIN_GUEST_MENU_BUTTON)],
         ],
         resize_keyboard=True,
     )
@@ -63,7 +63,7 @@ def build_admin_reports_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text=ADMIN_BACK_BUTTON)],
-            [KeyboardButton(text=MAIN_MENU_BUTTON)],
+            [KeyboardButton(text=ADMIN_GUEST_MENU_BUTTON)],
         ],
         resize_keyboard=True,
     )
@@ -73,7 +73,7 @@ def build_admin_statistics_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text=ADMIN_BACK_BUTTON)],
-            [KeyboardButton(text=MAIN_MENU_BUTTON)],
+            [KeyboardButton(text=ADMIN_GUEST_MENU_BUTTON)],
         ],
         resize_keyboard=True,
     )

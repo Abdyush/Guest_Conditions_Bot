@@ -1,9 +1,10 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from telegram import Update
 from telegram.ext import ContextTypes
 
 from src.presentation.telegram.callbacks.data_parser import (
+    ADMIN_OPEN_MAIN,
     ADMIN_OPEN_REPORTS,
     ADMIN_OPEN_STATISTICS,
     ADMIN_OPEN_SYSTEM,
@@ -23,6 +24,7 @@ from src.presentation.telegram.handlers.dependencies import TelegramHandlersDepe
 from src.presentation.telegram.handlers.shared.navigation import send_main_menu_for_guest
 from src.presentation.telegram.keyboards.admin_menu import (
     ADMIN_BACK_BUTTON,
+    ADMIN_GUEST_MENU_BUTTON,
     ADMIN_REPORT_ERRORS_BUTTON,
     ADMIN_REPORT_OFFERS_BUTTON,
     ADMIN_REPORT_RATES_BUTTON,
@@ -50,8 +52,10 @@ from src.presentation.telegram.keyboards.main_menu import build_main_menu_keyboa
 from src.presentation.telegram.presenters.admin_menu_presenter import (
     render_admin_access_denied,
     render_admin_main,
+    render_admin_main_reply_hint,
     render_admin_report,
     render_admin_reports_menu,
+    render_admin_submenu_reply_hint,
     render_admin_statistics_menu,
     render_admin_system_menu,
     render_blocked_users_last_week,
@@ -93,6 +97,9 @@ class AdminMenuScenario:
             return True
 
         session = await self._deps.sessions.get(telegram_user_id)
+        if text == ADMIN_GUEST_MENU_BUTTON:
+            await self._exit_to_guest_menu(telegram_user_id=telegram_user_id, message=message)
+            return True
         if text == ADMIN_SYSTEM_BUTTON:
             session.state = ConversationState.ADMIN_SYSTEM
             await self._show_admin_system(message)
@@ -132,26 +139,49 @@ class AdminMenuScenario:
             return
 
         session = await self._deps.sessions.get(telegram_user_id)
+        if data == ADMIN_OPEN_MAIN:
+            session.state = ConversationState.ADMIN_MENU
+            await query.answer()
+            if query.message is not None:
+                await query.edit_message_text(render_admin_main(), reply_markup=build_admin_main_inline_keyboard())
+                await self._show_reply_shell(
+                    query.message,
+                    text=render_admin_main_reply_hint(),
+                    reply_markup=build_admin_main_keyboard(),
+                )
+            return
         if data == ADMIN_OPEN_SYSTEM:
             session.state = ConversationState.ADMIN_SYSTEM
             await query.answer()
             if query.message is not None:
-                await query.message.reply_text(render_admin_system_menu(), reply_markup=build_admin_system_keyboard())
                 await query.edit_message_text(render_admin_system_menu(), reply_markup=build_admin_system_inline_keyboard())
+                await self._show_reply_shell(
+                    query.message,
+                    text=render_admin_submenu_reply_hint(),
+                    reply_markup=build_admin_system_keyboard(),
+                )
             return
         if data == ADMIN_OPEN_REPORTS:
             session.state = ConversationState.ADMIN_REPORTS
             await query.answer()
             if query.message is not None:
-                await query.message.reply_text(render_admin_reports_menu(), reply_markup=build_admin_reports_keyboard())
                 await query.edit_message_text(render_admin_reports_menu(), reply_markup=build_admin_reports_inline_keyboard())
+                await self._show_reply_shell(
+                    query.message,
+                    text=render_admin_submenu_reply_hint(),
+                    reply_markup=build_admin_reports_keyboard(),
+                )
             return
         if data == ADMIN_OPEN_STATISTICS:
             session.state = ConversationState.ADMIN_STATISTICS
             await query.answer()
             if query.message is not None:
-                await query.message.reply_text(render_admin_statistics_menu(), reply_markup=build_admin_statistics_keyboard())
                 await query.edit_message_text(render_admin_statistics_menu(), reply_markup=build_admin_statistics_inline_keyboard())
+                await self._show_reply_shell(
+                    query.message,
+                    text=render_admin_submenu_reply_hint(),
+                    reply_markup=build_admin_statistics_keyboard(),
+                )
             return
 
         if session.state == ConversationState.ADMIN_SYSTEM:
@@ -332,27 +362,49 @@ class AdminMenuScenario:
             await self._show_admin_main(message)
             return True
         if session.state == ConversationState.ADMIN_MENU:
-            await self._deps.sessions.reset(telegram_user_id)
-            guest_id = self._deps.identity.resolve_guest_id(telegram_user_id=telegram_user_id)
-            if guest_id:
-                await send_main_menu_for_guest(deps=self._deps, message=message, guest_id=guest_id)
-            else:
-                await message.reply_text("Меню администратора закрыто.", reply_markup=build_main_menu_keyboard())
+            await self._exit_to_guest_menu(telegram_user_id=telegram_user_id, message=message)
             return True
         return False
 
     async def _show_admin_main(self, message) -> None:
-        await message.reply_text(render_admin_main(), reply_markup=build_admin_main_keyboard())
         await message.reply_text(render_admin_main(), reply_markup=build_admin_main_inline_keyboard())
+        await self._show_reply_shell(
+            message,
+            text=render_admin_main_reply_hint(),
+            reply_markup=build_admin_main_keyboard(),
+        )
 
     async def _show_admin_system(self, message) -> None:
-        await message.reply_text(render_admin_system_menu(), reply_markup=build_admin_system_keyboard())
         await message.reply_text(render_admin_system_menu(), reply_markup=build_admin_system_inline_keyboard())
+        await self._show_reply_shell(
+            message,
+            text=render_admin_submenu_reply_hint(),
+            reply_markup=build_admin_system_keyboard(),
+        )
 
     async def _show_admin_reports(self, message) -> None:
-        await message.reply_text(render_admin_reports_menu(), reply_markup=build_admin_reports_keyboard())
         await message.reply_text(render_admin_reports_menu(), reply_markup=build_admin_reports_inline_keyboard())
+        await self._show_reply_shell(
+            message,
+            text=render_admin_submenu_reply_hint(),
+            reply_markup=build_admin_reports_keyboard(),
+        )
 
     async def _show_admin_statistics(self, message) -> None:
-        await message.reply_text(render_admin_statistics_menu(), reply_markup=build_admin_statistics_keyboard())
         await message.reply_text(render_admin_statistics_menu(), reply_markup=build_admin_statistics_inline_keyboard())
+        await self._show_reply_shell(
+            message,
+            text=render_admin_submenu_reply_hint(),
+            reply_markup=build_admin_statistics_keyboard(),
+        )
+
+    async def _show_reply_shell(self, message, *, text: str, reply_markup) -> None:
+        await message.reply_text(text, reply_markup=reply_markup)
+
+    async def _exit_to_guest_menu(self, *, telegram_user_id: int, message) -> None:
+        await self._deps.sessions.reset(telegram_user_id)
+        guest_id = self._deps.identity.resolve_guest_id(telegram_user_id=telegram_user_id)
+        if guest_id:
+            await send_main_menu_for_guest(deps=self._deps, message=message, guest_id=guest_id)
+            return
+        await message.reply_text("Меню администратора закрыто.", reply_markup=build_main_menu_keyboard())

@@ -6,6 +6,7 @@ from decimal import Decimal
 from typing import NamedTuple
 
 from src.application.dto.matched_date_record import MatchedDateRecord
+from src.presentation.telegram.presenters.booking_period import format_booking_period, format_ui_date
 from src.presentation.telegram.presenters.interest_request_presenter import (
     render_interest_request_calendar_prompt,
     render_interest_request_message,
@@ -36,7 +37,6 @@ class AvailableBreakfastPeriod:
     rows: list[MatchedDateRecord]
 
 
-
 def build_available_groups(*, category_groups: list[tuple[str, str]]) -> list[AvailableCategoryGroup]:
     grouped: dict[str, set[str]] = {}
     for category_name, group_id in category_groups:
@@ -52,15 +52,12 @@ def build_available_groups(*, category_groups: list[tuple[str, str]]) -> list[Av
     return out
 
 
-
 def render_available_groups_prompt() -> str:
     return "Выберите группу категорий, чтобы посмотреть доступные варианты и цены."
 
 
-
 def render_available_categories_prompt(*, group_label: str) -> str:
     return f"{group_label}\n\nВыберите категорию."
-
 
 
 def render_available_periods_prompt(*, category_name: str, periods: list[AvailableBreakfastPeriod]) -> str:
@@ -69,11 +66,10 @@ def render_available_periods_prompt(*, category_name: str, periods: list[Availab
     return f"{category_name}\n\nВыберите период проживания."
 
 
-
 def render_available_period_details(*, category_name: str, period: AvailablePeriod, last_room_dates: list[date]) -> str:
     lines = [
         category_name,
-        f"{format_date(period.display_start)} – {format_date(period.end)}",
+        format_booking_period(start_date=period.display_start, end_date_inclusive=period.end),
         "",
     ]
 
@@ -129,25 +125,17 @@ def render_available_period_details(*, category_name: str, period: AvailablePeri
     return "\n".join(lines).strip()
 
 
-
 def render_available_offer_text(*, offer_title: str | None, offer_text: str) -> str:
     title = offer_title or "Специальное предложение"
     return f"Специальное предложение: «{title}»\n\n{offer_text.strip()}"
 
 
-
 def render_available_request_calendar_prompt(*, category_name: str) -> str:
-    return f"{category_name}\n\nВыберите желаемый период проживания."
-
+    return render_interest_request_calendar_prompt(category_name=category_name)
 
 
 def render_available_request_tariff_prompt(*, category_name: str, checkin: date, checkout: date) -> str:
-    return (
-        f"{category_name}\n"
-        f"Период {format_date(checkin)} – {format_date(checkout)}\n\n"
-        "Выберите тариф."
-    )
-
+    return render_interest_request_tariff_prompt(category_name=category_name, checkin=checkin, checkout=checkout)
 
 
 def render_available_interest_message(
@@ -208,12 +196,10 @@ def render_available_request_text(
     )
 
 
-
 def render_available_category_periods(*, category_name: str, periods: list[AvailablePeriod]) -> str:
     if not periods:
         return f"{category_name}\n\nПериоды проживания:\nНет данных."
     return f"{category_name}\n\nПериоды проживания:"
-
 
 
 def build_available_periods(*, rows: list[MatchedDateRecord]) -> list[AvailablePeriod]:
@@ -241,7 +227,6 @@ def build_available_periods(*, rows: list[MatchedDateRecord]) -> list[AvailableP
         )
     periods.sort(key=lambda p: (p.start, p.end, p.min_new_price_minor))
     return periods
-
 
 
 def build_available_breakfast_periods(*, rows: list[MatchedDateRecord]) -> list[AvailableBreakfastPeriod]:
@@ -273,25 +258,20 @@ def build_available_breakfast_periods(*, rows: list[MatchedDateRecord]) -> list[
     return periods
 
 
-
 def format_period_button_label(*, start: date, end: date, price_minor: int) -> str:
-    return f"{format_date(start)} - {format_date(end)}, {minor_to_rub(price_minor):.2f} рублей в сутки"
-
+    return f"{format_booking_period(start_date=start, end_date_inclusive=end, separator=' - ')}, {minor_to_rub(price_minor):.2f} рублей в сутки"
 
 
 def format_breakfast_period_button_label(*, start: date, end: date, price_minor: int) -> str:
-    return f"{format_date(start)}–{format_date(end)} • {format_rub(price_minor)}/сутки"
-
+    return f"{format_booking_period(start_date=start, end_date_inclusive=end, separator='–')} • {format_rub(price_minor)}/сутки"
 
 
 def format_date(value: date) -> str:
-    return value.strftime("%d.%m.%y")
-
+    return format_ui_date(value)
 
 
 def minor_to_rub(value: int) -> float:
     return value / 100
-
 
 
 def format_rub(value_minor: int) -> str:
@@ -299,7 +279,6 @@ def format_rub(value_minor: int) -> str:
     if rub == rub.to_integral():
         return f"{int(rub):,}".replace(",", " ") + " ₽"
     return f"{rub:,.2f}".replace(",", " ").replace(".", ",") + " ₽"
-
 
 
 def tariff_label(tariff: str) -> str:
@@ -311,12 +290,10 @@ def tariff_label(tariff: str) -> str:
     return tariff
 
 
-
 def format_percent(value: Decimal) -> str:
     raw = f"{value * Decimal('100'):.2f}"
     trimmed = raw.rstrip("0").rstrip(".")
     return f"{trimmed}%"
-
 
 
 def _group_bucket_label(*, group_id: str, category_name: str) -> str:
@@ -333,9 +310,6 @@ def _group_bucket_label(*, group_id: str, category_name: str) -> str:
     return group_id.title()
 
 
-
 def _tariff_sort_keys(keys) -> list[str]:
     order = {"breakfast": 0, "fullpansion": 1}
     return sorted(keys, key=lambda key: (order.get(key, 100), key))
-
-

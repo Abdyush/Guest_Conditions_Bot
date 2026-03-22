@@ -9,6 +9,7 @@ from src.presentation.telegram.handlers.subflows.interest_request import (
     InterestRequestStartContext,
     InterestRequestSubflow,
 )
+from src.presentation.telegram.presenters.booking_period import booking_coverage_end
 from src.presentation.telegram.keyboards.main_menu import PERIOD_QUOTES_BUTTON, build_phone_request_keyboard
 from src.presentation.telegram.keyboards.period_quotes import (
     build_period_quotes_calendar_inline_keyboard,
@@ -120,7 +121,10 @@ class PeriodQuotesScenario:
         await query.answer()
         if query.message is not None:
             await query.edit_message_text(
-                text=render_period_quotes_category_prompt(period_start=draft.checkin, period_end=draft.checkout),
+                text=render_period_quotes_category_prompt(
+                    period_start=draft.checkin,
+                    period_end=booking_coverage_end(draft.checkout),
+                ),
                 reply_markup=build_period_quotes_categories_inline_keyboard(category_names=category_names),
             )
 
@@ -367,7 +371,10 @@ class PeriodQuotesScenario:
         category_names = draft.category_names or []
         if query.message is not None:
             await query.edit_message_text(
-                render_period_quotes_category_prompt(period_start=draft.checkin, period_end=draft.checkout),
+                render_period_quotes_category_prompt(
+                    period_start=draft.checkin,
+                    period_end=booking_coverage_end(draft.checkout),
+                ),
                 reply_markup=build_period_quotes_categories_inline_keyboard(category_names=category_names),
             )
 
@@ -431,11 +438,13 @@ class PeriodQuotesScenario:
                 await query.message.reply_text(msg("auth_required"), reply_markup=build_phone_request_keyboard())
             return
 
+        period_end_inclusive = booking_coverage_end(period_end)
+
         try:
             run_id, quotes = self._deps.period_quotes.get_period_quotes(
                 guest_id=guest_id,
                 period_start=period_start,
-                period_end=period_end,
+                period_end=period_end_inclusive,
                 group_ids=None,
             )
             last_room_dates_by_category: dict[str, list[date]] = {}
@@ -445,7 +454,7 @@ class PeriodQuotesScenario:
                     guest_id=guest_id,
                     category_name=category_name,
                     period_start=period_start,
-                    period_end=period_end,
+                    period_end=period_end_inclusive,
                     tariffs=tariffs,
                 )
         except Exception:
@@ -476,7 +485,7 @@ class PeriodQuotesScenario:
         available_group_ids = self._available_group_ids_from_quotes(quotes)
         if not available_group_ids:
             await query.edit_message_text(
-                render_period_quotes_empty(period_start=period_start, period_end=period_end),
+                render_period_quotes_empty(period_start=period_start, period_end=period_end_inclusive),
                 reply_markup=build_period_quotes_empty_inline_keyboard(),
             )
             return
@@ -517,7 +526,7 @@ class PeriodQuotesScenario:
                 render_period_quote_card(
                     category_name=category_name,
                     period_start=draft.checkin,
-                    period_end=draft.checkout,
+                    period_end=booking_coverage_end(draft.checkout),
                     quotes=quotes,
                     last_room_dates=last_room_dates,
                 ),
@@ -546,7 +555,10 @@ class PeriodQuotesScenario:
         if query.message is not None:
             await query.answer()
             await query.edit_message_text(
-                render_period_quotes_category_prompt(period_start=draft.checkin, period_end=draft.checkout),
+                render_period_quotes_category_prompt(
+                    period_start=draft.checkin,
+                    period_end=booking_coverage_end(draft.checkout),
+                ),
                 reply_markup=build_period_quotes_categories_inline_keyboard(category_names=draft.category_names or []),
             )
 
