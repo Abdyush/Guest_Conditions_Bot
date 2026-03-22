@@ -29,8 +29,10 @@ EDIT_PRICE_BUTTON = BUTTONS["edit_price"]
 def build_main_menu_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text=EDIT_DATA_BUTTON), KeyboardButton(text=AVAILABLE_ROOMS_BUTTON)],
-            [KeyboardButton(text=PERIOD_QUOTES_BUTTON), KeyboardButton(text=BEST_PERIOD_BUTTON)],
+            [KeyboardButton(text=AVAILABLE_ROOMS_BUTTON)],
+            [KeyboardButton(text=PERIOD_QUOTES_BUTTON)],
+            [KeyboardButton(text=BEST_PERIOD_BUTTON)],
+            [KeyboardButton(text=EDIT_DATA_BUTTON)],
         ],
         resize_keyboard=True,
     )

@@ -2,22 +2,26 @@ from __future__ import annotations
 
 
 BUTTONS = {
-    "best_period": "Самый выгодный период",
-    "period_quotes": "Цены на период",
-    "available_rooms": "Доступные номера",
-    "edit_data": "Редактировать данные",
-    "back": "Назад",
-    "main_menu": "Главное меню",
-    "cancel": "Отмена",
-    "share_phone": "Поделиться номером",
-    "groups_done": "Готово",
-    "edit_adults": "Количество взрослых",
-    "edit_children": "Количество детей от 4 до 13 лет",
-    "edit_infants": "Количество детей до 3 лет",
-    "edit_groups": "Любимые категории",
-    "edit_loyalty": "Статус в программе лояльности",
-    "edit_bank": "Статус в Сбере",
-    "edit_price": "Желаемая сумма за сутки",
+    "best_period": "📉 Самый выгодный период",
+    "period_quotes": "📅 Цены на период",
+    "available_rooms": "🏨 Доступные номера",
+    "edit_data": "⚙️ Редактировать данные",
+
+    "back": "⬅️ Назад",
+    "main_menu": "🏠 Главное меню",
+    "cancel": "❌ Отмена",
+
+    "share_phone": "📱 Поделиться номером",
+    "groups_done": "✅ Готово",
+
+    "edit_adults": "🧑 Взрослые",
+    "edit_children": "👶 Дети 4–13",
+    "edit_infants": "🍼 Дети до 3",
+
+    "edit_groups": "❤️ Любимые категории",
+    "edit_loyalty": "⭐ Лояльность",
+    "edit_bank": "🏦 Сбер статус",
+    "edit_price": "💰 Желаемая цена",
 }
 
 CATEGORY_LABEL_TO_CODE = {
