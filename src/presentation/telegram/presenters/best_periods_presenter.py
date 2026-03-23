@@ -2,9 +2,8 @@ from __future__ import annotations
 
 from src.application.dto.period_pick import PeriodPickDTO
 from src.application.dto.period_quote import PeriodQuote
-from src.presentation.telegram.presenters.booking_period import format_booking_period
 from src.presentation.telegram.presenters.period_quotes_presenter import (
-    render_period_quote_card,
+    render_best_period_quote_card,
     render_period_quote_offer_text,
 )
 
@@ -37,20 +36,13 @@ def render_best_period_card(
     quotes: list[PeriodQuote],
     last_room_dates: list,
 ) -> str:
-    header = (
-        f"{category_name}\n"
-        f"\u0421\u0430\u043c\u044b\u0439 \u0432\u044b\u0433\u043e\u0434\u043d\u044b\u0439 \u043f\u0435\u0440\u0438\u043e\u0434: "
-        f"{format_booking_period(start_date=best_pick.start_date, end_date_inclusive=best_pick.end_date_inclusive, separator=' - ')}\n\n"
-        "\u0412\u043e\u0442 \u0441\u0430\u043c\u044b\u0439 \u0432\u044b\u0433\u043e\u0434\u043d\u044b\u0439 \u0434\u043e\u0441\u0442\u0443\u043f\u043d\u044b\u0439 \u043f\u0435\u0440\u0438\u043e\u0434 \u0434\u043b\u044f \u044d\u0442\u043e\u0439 \u043a\u0430\u0442\u0435\u0433\u043e\u0440\u0438\u0438:\n"
-    )
-    body = render_period_quote_card(
+    return render_best_period_quote_card(
         category_name=category_name,
         period_start=best_pick.start_date,
         period_end=best_pick.end_date_inclusive,
         quotes=quotes,
         last_room_dates=last_room_dates,
     )
-    return f"{header}\n{body}".strip()
 
 
 def render_best_offer_text(*, offer_title: str | None, offer_text: str) -> str:

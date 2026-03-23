@@ -19,5 +19,5 @@ async def send_main_menu_for_guest(*, deps: TelegramHandlersDependencies, messag
             reply_markup=build_phone_request_keyboard(),
         )
         return
-    await message.reply_text(render_profile(profile), reply_markup=build_main_menu_keyboard())
+    await message.reply_text(render_profile(profile, getattr(message, "from_user", None)), reply_markup=build_main_menu_keyboard())
 

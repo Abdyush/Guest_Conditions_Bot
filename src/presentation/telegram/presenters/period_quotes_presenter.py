@@ -4,6 +4,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from typing import Iterable
 
 from src.application.dto.period_quote import PeriodQuote
+from src.presentation.telegram.presenters.available_presenter import format_price_minor
 from src.presentation.telegram.presenters.booking_period import format_booking_period, format_ui_date
 
 
@@ -49,6 +50,81 @@ def render_period_quote_card(
     quotes: list[PeriodQuote],
     last_room_dates: list,
 ) -> str:
+    return _render_period_quote_card_blocks(
+        category_name=category_name,
+        period_start=period_start,
+        period_end=period_end,
+        quotes=quotes,
+        last_room_dates=last_room_dates,
+    )
+
+
+def render_best_period_quote_card(
+    *,
+    category_name: str,
+    period_start,
+    period_end,
+    quotes: list[PeriodQuote],
+    last_room_dates: list,
+) -> str:
+    return _render_period_quote_card_blocks(
+        category_name=category_name,
+        period_start=period_start,
+        period_end=period_end,
+        quotes=quotes,
+        last_room_dates=last_room_dates,
+        period_label="\U0001f48e \u0421\u0430\u043c\u044b\u0439 \u0432\u044b\u0433\u043e\u0434\u043d\u044b\u0439 \u043f\u0435\u0440\u0438\u043e\u0434:",
+    )
+
+
+def _render_period_quote_card_blocks(
+    *,
+    category_name: str,
+    period_start,
+    period_end,
+    quotes: list[PeriodQuote],
+    last_room_dates: list,
+    period_label: str | None = None,
+) -> str:
+    blocks = [f"\U0001f3e1 {category_name}"]
+
+    if period_label:
+        blocks.append(
+            "\n".join(
+                [
+                    period_label,
+                    f"\U0001f4c5 {format_booking_period(start_date=period_start, end_date_inclusive=period_end, separator=' \u2013 ')}",
+                ]
+            )
+        )
+    else:
+        blocks.append(
+            f"\U0001f4c5 {format_booking_period(start_date=period_start, end_date_inclusive=period_end, separator=' \u2013 ')}"
+        )
+
+    tariff_blocks = ["\n".join(_render_tariff_block(quote)) for quote in _sorted_quotes(quotes)]
+    if tariff_blocks:
+        blocks.append("\n\n".join(tariff_blocks))
+
+    discount_lines = _render_discount_lines(quotes)
+    if discount_lines:
+        blocks.append("\n".join(["\u2728 \u041f\u0440\u0438\u043c\u0435\u043d\u0451\u043d\u043d\u044b\u0435 \u0441\u043a\u0438\u0434\u043a\u0438", *discount_lines]))
+
+    if last_room_dates:
+        formatted_dates = ", ".join(format_date(value) for value in sorted(set(last_room_dates)))
+        blocks.append("\n".join(["\u26a0\ufe0f \u041e\u0441\u0442\u0430\u043b\u0438\u0441\u044c \u043f\u043e\u0441\u043b\u0435\u0434\u043d\u0438\u0435 \u0434\u0430\u0442\u044b", formatted_dates]))
+
+    return "\n\n".join(blocks).strip()
+
+
+def render_period_quote_card_legacy(
+    *,
+    category_name: str,
+    period_start,
+    period_end,
+    quotes: list[PeriodQuote],
+    last_room_dates: list,
+) -> str:
     lines = [
         category_name,
         format_booking_period(start_date=period_start, end_date_inclusive=period_end, separator=" - "),
@@ -56,10 +132,10 @@ def render_period_quote_card(
     ]
 
     for quote in _sorted_quotes(quotes):
-        lines.extend(_render_tariff_block(quote))
+        lines.extend(_render_tariff_block_legacy(quote))
         lines.append("")
 
-    discount_lines = _render_discount_lines(quotes)
+    discount_lines = _render_discount_lines_legacy(quotes)
     if discount_lines:
         lines.append("\u041f\u0440\u0438\u043c\u0435\u043d\u0451\u043d\u043d\u044b\u0435 \u0441\u043a\u0438\u0434\u043a\u0438:")
         lines.extend(discount_lines)
@@ -86,6 +162,27 @@ def _render_tariff_block(quote: PeriodQuote) -> list[str]:
     new_per_night = _minor_per_night(quote.total_new_minor, quote.nights)
     benefit = old_per_night - new_per_night
 
+    lines = [f"\U0001f37d {tariff_label(quote.tariff)}"]
+    if quote.applied_from != quote.from_date or quote.applied_to != quote.to_date:
+        lines.append(
+            f"\u041f\u0435\u0440\u0438\u043e\u0434 \u0434\u0435\u0439\u0441\u0442\u0432\u0438\u044f \u0442\u0430\u0440\u0438\u0444\u0430: "
+            f"{format_booking_period(start_date=quote.applied_from, end_date_inclusive=quote.applied_to, separator=' \u2013 ')}"
+        )
+    lines.extend(
+        [
+            f"\u0426\u0435\u043d\u0430 \u0440\u044b\u043d\u043a\u0430: {format_money(old_per_night)} \u20bd/\u0441\u0443\u0442\u043a\u0438",
+            f"\u0412\u0430\u0448\u0430 \u0446\u0435\u043d\u0430: {format_money(new_per_night)} \u20bd/\u0441\u0443\u0442\u043a\u0438",
+            f"\u0412\u044b\u0433\u043e\u0434\u0430: {format_money(benefit)} \u20bd/\u0441\u0443\u0442\u043a\u0438",
+        ]
+    )
+    return lines
+
+
+def _render_tariff_block_legacy(quote: PeriodQuote) -> list[str]:
+    old_per_night = _minor_per_night(quote.total_old_minor, quote.nights)
+    new_per_night = _minor_per_night(quote.total_new_minor, quote.nights)
+    benefit = old_per_night - new_per_night
+
     lines = [f"\u0422\u0430\u0440\u0438\u0444: {tariff_label(quote.tariff)}"]
     if quote.applied_from != quote.from_date or quote.applied_to != quote.to_date:
         lines.append(
@@ -94,15 +191,39 @@ def _render_tariff_block(quote: PeriodQuote) -> list[str]:
         )
     lines.extend(
         [
-            f"\u0426\u0435\u043d\u0430 \u043e\u0442\u043a\u0440\u044b\u0442\u043e\u0433\u043e \u0440\u044b\u043d\u043a\u0430: {format_money(old_per_night)} \u20bd/\u0441\u0443\u0442\u043a\u0438",
-            f"\u0412\u0430\u0448\u0430 \u0446\u0435\u043d\u0430: {format_money(new_per_night)} \u20bd/\u0441\u0443\u0442\u043a\u0438",
-            f"\u0412\u0430\u0448\u0430 \u0432\u044b\u0433\u043e\u0434\u0430: {format_money(benefit)} \u20bd/\u0441\u0443\u0442\u043a\u0438",
+            f"\u0426\u0435\u043d\u0430 \u043e\u0442\u043a\u0440\u044b\u0442\u043e\u0433\u043e \u0440\u044b\u043d\u043a\u0430: {format_money_legacy(old_per_night)} \u20bd/\u0441\u0443\u0442\u043a\u0438",
+            f"\u0412\u0430\u0448\u0430 \u0446\u0435\u043d\u0430: {format_money_legacy(new_per_night)} \u20bd/\u0441\u0443\u0442\u043a\u0438",
+            f"\u0412\u0430\u0448\u0430 \u0432\u044b\u0433\u043e\u0434\u0430: {format_money_legacy(benefit)} \u20bd/\u0441\u0443\u0442\u043a\u0438",
         ]
     )
     return lines
 
 
 def _render_discount_lines(quotes: Iterable[PeriodQuote]) -> list[str]:
+    lines: list[str] = []
+    seen: set[str] = set()
+    for quote in quotes:
+        if quote.offer_repr:
+            offer_name = f"\u00ab{quote.offer_title}\u00bb" if quote.offer_title else "\u0421\u043f\u0435\u0446\u043f\u0440\u0435\u0434\u043b\u043e\u0436\u0435\u043d\u0438\u0435"
+            label = f"\u2022 {offer_name} \u2014 {quote.offer_repr}"
+            if label not in seen:
+                lines.append(label)
+                seen.add(label)
+        if quote.bank_status and quote.bank_percent is not None:
+            label = f"\u2022 {_format_bank_discount_name(quote.bank_status)} \u2014 {_format_percent_text(quote.bank_percent)}"
+            if label not in seen:
+                lines.append(label)
+                seen.add(label)
+        elif quote.loyalty_status and quote.loyalty_percent is not None:
+            status = quote.loyalty_status.capitalize()
+            label = f"\u2022 {status} \u2014 {_format_percent_text(quote.loyalty_percent)}"
+            if label not in seen:
+                lines.append(label)
+                seen.add(label)
+    return lines
+
+
+def _render_discount_lines_legacy(quotes: Iterable[PeriodQuote]) -> list[str]:
     lines: list[str] = []
     seen: set[str] = set()
     for quote in quotes:
@@ -134,6 +255,11 @@ def _minor_per_night(total_minor: int, nights: int) -> Decimal:
 
 
 def format_money(amount: Decimal) -> str:
+    minor = int((amount * Decimal("100")).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+    return format_price_minor(minor)
+
+
+def format_money_legacy(amount: Decimal) -> str:
     normalized = amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     if normalized == normalized.to_integral():
         return f"{int(normalized):,}".replace(",", " ")
@@ -152,3 +278,28 @@ def tariff_label(value: str) -> str:
 def _sorted_quotes(quotes: list[PeriodQuote]) -> list[PeriodQuote]:
     order = {"breakfast": 0, "fullpansion": 1}
     return sorted(quotes, key=lambda item: (order.get(item.tariff.strip().lower(), 99), item.applied_from, item.applied_to))
+
+
+def _format_percent_text(value: str) -> str:
+    raw = value.strip()
+    if raw.endswith("%"):
+        return raw
+    try:
+        decimal_value = Decimal(raw)
+    except Exception:
+        return raw
+    if decimal_value <= Decimal("1"):
+        decimal_value *= Decimal("100")
+    normalized = decimal_value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    if normalized == normalized.to_integral():
+        return f"{int(normalized)}%"
+    return f"{normalized.normalize()}%".replace(".", ",")
+
+
+def _format_bank_discount_name(bank_status: str) -> str:
+    labels = {
+        "SBER_PREMIER": "\u0421\u0431\u0435\u0440\u041f\u0440\u0435\u043c\u044c\u0435\u0440",
+        "SBER_FIRST": "\u0421\u0431\u0435\u0440\u041f\u0435\u0440\u0432\u044b\u0439",
+        "SBER_PRIVATE": "\u0421\u0431\u0435\u0440\u041f\u0440\u0430\u0439\u0432\u0430\u0442",
+    }
+    return labels.get(bank_status, bank_status)

@@ -1,26 +1,79 @@
 from __future__ import annotations
 
 from src.domain.entities.guest_preferences import GuestPreferences
+from src.domain.value_objects.bank import BankStatus
+from src.domain.value_objects.loyalty import LoyaltyStatus
+from src.presentation.telegram.mappers.value_parser import telegram_profile_name
 from src.presentation.telegram.ui_texts import CATEGORY_LABEL_TO_CODE
 
 
-def render_profile(profile: GuestPreferences) -> str:
+LOYALTY_EMOJI = {
+    LoyaltyStatus.WHITE: "⚪",
+    LoyaltyStatus.BRONZE: "🥉",
+    LoyaltyStatus.SILVER: "🥈",
+    LoyaltyStatus.GOLD: "🥇",
+    LoyaltyStatus.PLATINUM: "💎",
+    LoyaltyStatus.DIAMOND: "🔷",
+}
+
+SBER_LEVEL_LABELS = {
+    BankStatus.SBER_PREMIER: "СберПремьер",
+    BankStatus.SBER_FIRST: "СберПервый",
+    BankStatus.SBER_PRIVATE: "СберПрайват",
+}
+
+
+def render_profile(profile: GuestPreferences, user=None) -> str:
     code_to_label = {v: k for k, v in CATEGORY_LABEL_TO_CODE.items()}
     groups = sorted(profile.effective_allowed_groups or set())
-    group_lines = [f" - {code_to_label.get(g, g)}" for g in groups] if groups else [" - \u2014"]
-    loyalty = profile.loyalty_status.value.capitalize() if profile.loyalty_status else "\u2014"
-    bank = profile.bank_status.value if profile.bank_status else "\u043d\u0435\u0442"
-    desired = profile.desired_price_per_night.round_rubles()
-    name = profile.guest_name or "\u0413\u043e\u0441\u0442\u044c"
+    categories_list = "\n".join(f"• {code_to_label.get(group, group)}" for group in groups) if groups else "• —"
+    full_name = _format_full_name(profile=profile, user=user)
+    adults_text = _format_adults(profile.occupancy.adults)
+    status_line = _format_status_line(profile)
+    price_formatted = _format_price(profile.desired_price_per_night.round_rubles())
     return (
-        "\u0412\u0430\u0448\u0438 \u0434\u0430\u043d\u043d\u044b\u0435:\n"
-        f" \u0418\u043c\u044f: {name}\n"
-        f" \u0412\u0437\u0440\u043e\u0441\u043b\u044b\u0445: {profile.occupancy.adults}\n"
-        f" \u0414\u0435\u0442\u0435\u0439 4\u201317: {profile.occupancy.children_4_13}\n"
-        f" \u0414\u0435\u0442\u0435\u0439 0\u20133: {profile.occupancy.infants}\n"
-        " \u041a\u0430\u0442\u0435\u0433\u043e\u0440\u0438\u0438:\n"
-        f"{chr(10).join(group_lines)}\n"
-        f" \u0421\u0442\u0430\u0442\u0443\u0441 \u043b\u043e\u044f\u043b\u044c\u043d\u043e\u0441\u0442\u0438: {loyalty}\n"
-        f" \u0421\u0442\u0430\u0442\u0443\u0441 \u0432 \u0421\u0431\u0435\u0440\u0435: {bank}\n"
-        f" \u0416\u0435\u043b\u0430\u0435\u043c\u0430\u044f \u0446\u0435\u043d\u0430: {desired} \u20bd"
+        "Ваши данные\n\n"
+        f"👤 {full_name}\n\n"
+        "👥 Состав гостей\n"
+        f"{adults_text}\n"
+        f"Дети 4–17: {profile.occupancy.children_4_13}\n"
+        f"Дети 0–3: {profile.occupancy.infants}\n\n"
+        "🏨 Выбранные категории\n"
+        f"{categories_list}\n\n"
+        "💎 Статус\n"
+        f"{status_line}\n\n"
+        "💰 Целевой бюджет\n"
+        f"{price_formatted} ₽ за сутки"
     )
+
+
+def _format_full_name(profile: GuestPreferences, user) -> str:
+    if user is not None:
+        full_name = telegram_profile_name(user).strip()
+        if full_name and full_name != "Guest":
+            return full_name
+    guest_name = (profile.guest_name or "").strip()
+    return guest_name or "Гость"
+
+
+def _format_adults(adults: int) -> str:
+    if adults == 1:
+        return "1 взрослый"
+    return f"{adults} взрослых"
+
+
+def _format_status_line(profile: GuestPreferences) -> str:
+    if profile.bank_status is not None:
+        sber_level = SBER_LEVEL_LABELS.get(profile.bank_status)
+        if sber_level:
+            return f"🏦 {sber_level}"
+        return "🏦 Сбер: подключён"
+
+    loyalty_status = profile.loyalty_status or LoyaltyStatus.WHITE
+    loyalty_label = loyalty_status.value.capitalize()
+    loyalty_emoji = LOYALTY_EMOJI[loyalty_status]
+    return f"{loyalty_emoji} {loyalty_label}"
+
+
+def _format_price(value: int) -> str:
+    return f"{value:,}".replace(",", " ")

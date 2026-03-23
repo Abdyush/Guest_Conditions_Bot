@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from typing import NamedTuple
 
 from src.application.dto.matched_date_record import MatchedDateRecord
@@ -67,12 +67,6 @@ def render_available_periods_prompt(*, category_name: str, periods: list[Availab
 
 
 def render_available_period_details(*, category_name: str, period: AvailablePeriod, last_room_dates: list[date]) -> str:
-    lines = [
-        category_name,
-        format_booking_period(start_date=period.display_start, end_date_inclusive=period.end),
-        "",
-    ]
-
     rows_by_tariff: dict[str, MatchedDateRecord] = {}
     for row in period.rows:
         key = row.tariff.strip().lower()
@@ -80,49 +74,37 @@ def render_available_period_details(*, category_name: str, period: AvailablePeri
         if current is None or row.new_price_minor < current.new_price_minor:
             rows_by_tariff[key] = row
 
+    blocks = [
+        f"🏡 {category_name}",
+        f"📅 {format_booking_period(start_date=period.display_start, end_date_inclusive=period.end, separator=' – ')}",
+    ]
+
+    tariff_blocks: list[str] = []
     for tariff_key in _tariff_sort_keys(rows_by_tariff.keys()):
         row = rows_by_tariff[tariff_key]
         benefit_minor = row.old_price_minor - row.new_price_minor
-        lines.extend(
-            [
-                f"Тариф: {tariff_label(row.tariff)}",
-                f"Цена открытого рынка: {format_rub(row.old_price_minor)}/сутки",
-                f"Ваша цена: {format_rub(row.new_price_minor)}/сутки",
-                f"Ваша выгода: {format_rub(benefit_minor)}/сутки",
-                "",
-            ]
+        tariff_blocks.append(
+            "\n".join(
+                [
+                    f"🍽 {tariff_label(row.tariff)}",
+                    f"Цена рынка: {format_price_minor(row.old_price_minor)} ₽/сутки",
+                    f"Ваша цена: {format_price_minor(row.new_price_minor)} ₽/сутки",
+                    f"Выгода: {format_price_minor(benefit_minor)} ₽/сутки",
+                ]
+            )
         )
+    if tariff_blocks:
+        blocks.append("\n\n".join(tariff_blocks))
 
-    offer_name = "—"
-    offer_percent = "—"
-    status_name = "—"
-    status_percent = "—"
-    for row in period.rows:
-        if row.offer_title or row.offer_repr or row.offer_id:
-            offer_name = row.offer_title or row.offer_id or "—"
-            offer_percent = row.offer_repr or "—"
-            break
-    for row in period.rows:
-        if row.bank_status and row.bank_percent is not None:
-            status_name = f"Статус в Сбере: {row.bank_status}"
-            status_percent = format_percent(row.bank_percent)
-            break
-        if row.loyalty_status and row.loyalty_percent is not None:
-            status_name = f"Программа лояльности: {str(row.loyalty_status).capitalize()}"
-            status_percent = format_percent(row.loyalty_percent)
-            break
+    discount_lines = _render_available_discount_lines(period.rows)
+    if discount_lines:
+        blocks.append("\n".join(["✨ Применённые скидки", *discount_lines]))
 
-    lines.extend(
-        [
-            "Применённые скидки:",
-            f"• Специальное предложение: «{offer_name}» — {offer_percent}" if offer_name != "—" else "• Специальное предложение: —",
-            f"• {status_name} — {status_percent}" if status_name != "—" else "• Статус: —",
-        ]
-    )
     if last_room_dates:
         last_room_line = ", ".join(format_date(x) for x in sorted(set(last_room_dates)))
-        lines.extend(["", f"Последние номера: {last_room_line}"])
-    return "\n".join(lines).strip()
+        blocks.append("\n".join(["⚠️ Остались последние даты", last_room_line]))
+
+    return "\n\n".join(blocks).strip()
 
 
 def render_available_offer_text(*, offer_title: str | None, offer_text: str) -> str:
@@ -281,6 +263,10 @@ def format_rub(value_minor: int) -> str:
     return f"{rub:,.2f}".replace(",", " ").replace(".", ",") + " ₽"
 
 
+def format_price_minor(value_minor: int) -> str:
+    return format_money_amount(Decimal(value_minor) / Decimal("100"))
+
+
 def tariff_label(tariff: str) -> str:
     key = tariff.strip().lower()
     if key == "breakfast":
@@ -294,6 +280,13 @@ def format_percent(value: Decimal) -> str:
     raw = f"{value * Decimal('100'):.2f}"
     trimmed = raw.rstrip("0").rstrip(".")
     return f"{trimmed}%"
+
+
+def format_money_amount(value: Decimal) -> str:
+    normalized = value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    if normalized == normalized.to_integral():
+        return f"{int(normalized):,}".replace(",", " ")
+    return f"{normalized:,.2f}".replace(",", " ").replace(".", ",")
 
 
 def _group_bucket_label(*, group_id: str, category_name: str) -> str:
@@ -313,3 +306,40 @@ def _group_bucket_label(*, group_id: str, category_name: str) -> str:
 def _tariff_sort_keys(keys) -> list[str]:
     order = {"breakfast": 0, "fullpansion": 1}
     return sorted(keys, key=lambda key: (order.get(key, 100), key))
+
+
+def _render_available_discount_lines(rows: list[MatchedDateRecord]) -> list[str]:
+    lines: list[str] = []
+    seen: set[str] = set()
+
+    for row in rows:
+        if row.offer_repr:
+            offer_name = f"«{row.offer_title}»" if row.offer_title else "Спецпредложение"
+            label = f"• {offer_name} — {row.offer_repr}"
+            if label not in seen:
+                lines.append(label)
+                seen.add(label)
+
+    for row in rows:
+        if row.bank_status and row.bank_percent is not None:
+            label = f"• {_format_bank_discount_name(row.bank_status)} — {format_percent(row.bank_percent)}"
+            if label not in seen:
+                lines.append(label)
+                seen.add(label)
+                continue
+        if row.loyalty_status and row.loyalty_percent is not None:
+            label = f"• {str(row.loyalty_status).capitalize()} — {format_percent(row.loyalty_percent)}"
+            if label not in seen:
+                lines.append(label)
+                seen.add(label)
+
+    return lines
+
+
+def _format_bank_discount_name(bank_status: str) -> str:
+    labels = {
+        "SBER_PREMIER": "СберПремьер",
+        "SBER_FIRST": "СберПервый",
+        "SBER_PRIVATE": "СберПрайват",
+    }
+    return labels.get(bank_status, bank_status)

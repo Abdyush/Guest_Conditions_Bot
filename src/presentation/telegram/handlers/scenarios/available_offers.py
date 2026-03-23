@@ -533,9 +533,17 @@ class AvailableOffersScenario:
                 ),
             )
 
-    async def _show_interest_request_source_details(self, *, guest_id: str, telegram_user_id: int, query) -> None:
-        session = await self._deps.sessions.get(telegram_user_id)
-        draft = session.interest_request
+    async def _show_interest_request_source_details(
+        self,
+        *,
+        guest_id: str,
+        telegram_user_id: int,
+        query,
+        draft=None,
+    ) -> None:
+        if draft is None:
+            session = await self._deps.sessions.get(telegram_user_id)
+            draft = session.interest_request
         if (
             draft is None
             or draft.source_group_idx is None
@@ -554,9 +562,17 @@ class AvailableOffersScenario:
             preserve_request=True,
         )
 
-    async def _show_interest_request_categories(self, *, guest_id: str, telegram_user_id: int, query) -> None:
+    async def _show_interest_request_categories(
+        self,
+        *,
+        guest_id: str,
+        telegram_user_id: int,
+        query,
+        draft=None,
+    ) -> None:
         session = await self._deps.sessions.get(telegram_user_id)
-        draft = session.interest_request
+        if draft is None:
+            draft = session.interest_request
         group_idx = None if draft is None else draft.source_group_idx
         session.interest_request = None
         if group_idx is None:
@@ -640,7 +656,15 @@ class AvailableOffersScenario:
 
     def _available_groups_for_guest(self, *, guest_id: str):
         category_groups = self._deps.available_offers.get_available_categories_with_groups(guest_id=guest_id)
-        return build_available_groups(category_groups=category_groups)
+        visible_category_groups: list[tuple[str, str]] = []
+        for category_name, group_id in category_groups:
+            _, rows = self._deps.available_offers.get_category_matches(
+                guest_id=guest_id,
+                category_name=category_name,
+            )
+            if build_available_breakfast_periods(rows=rows):
+                visible_category_groups.append((category_name, group_id))
+        return build_available_groups(category_groups=visible_category_groups)
 
 
 def _parse_two_indices(first: str, second: str) -> tuple[int, int] | None:
@@ -688,6 +712,7 @@ class _AvailableInterestRequestAdapter:
             guest_id=guest_id,
             telegram_user_id=telegram_user_id,
             query=query,
+            draft=draft,
         )
 
     async def show_parent_screen(self, *, guest_id: str, telegram_user_id: int, query, draft) -> None:
@@ -695,6 +720,7 @@ class _AvailableInterestRequestAdapter:
             guest_id=guest_id,
             telegram_user_id=telegram_user_id,
             query=query,
+            draft=draft,
         )
 
     async def show_period_screen(self, *, guest_id: str, telegram_user_id: int, query, draft) -> None:
@@ -702,6 +728,7 @@ class _AvailableInterestRequestAdapter:
             guest_id=guest_id,
             telegram_user_id=telegram_user_id,
             query=query,
+            draft=draft,
         )
 
 
