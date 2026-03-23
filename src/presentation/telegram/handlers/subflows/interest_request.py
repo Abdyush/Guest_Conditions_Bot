@@ -163,16 +163,19 @@ class InterestRequestSubflow:
         if draft is None or draft.month_cursor is None:
             await query.answer()
             return
+        today = date.today()
+        min_month_cursor = today.replace(day=1)
 
         if data == "avreq:cal:noop":
             await query.answer()
             return
         if data.startswith("avreq:cal:nav:"):
             try:
-                draft.month_cursor = date.fromisoformat(data.split(":", 3)[3]).replace(day=1)
+                next_month_cursor = date.fromisoformat(data.split(":", 3)[3]).replace(day=1)
             except ValueError:
                 await query.answer()
                 return
+            draft.month_cursor = max(next_month_cursor, min_month_cursor)
             await query.answer()
             if query.message is not None:
                 await query.edit_message_reply_markup(
@@ -192,6 +195,19 @@ class InterestRequestSubflow:
             picked = date.fromisoformat(data.split(":", 3)[3])
         except ValueError:
             await query.answer()
+            return
+        if picked < today:
+            draft.month_cursor = min_month_cursor
+            await query.answer("Нельзя выбрать прошедшую дату", show_alert=False)
+            if query.message is not None:
+                await query.edit_message_reply_markup(
+                    reply_markup=build_interest_request_calendar_inline_keyboard(
+                        month_cursor=draft.month_cursor,
+                        checkin=draft.checkin,
+                        checkout=draft.checkout,
+                        parent_back_text=self._adapter.calendar_parent_back_text,
+                    )
+                )
             return
 
         if draft.checkin is None:

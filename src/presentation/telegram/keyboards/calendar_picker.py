@@ -41,6 +41,11 @@ def build_period_calendar_keyboard(
     checkout: date | None,
     callback_prefix: str = "cal",
 ) -> InlineKeyboardMarkup:
+    today = date.today()
+    min_month_cursor = first_day_of_month(today)
+    if month_cursor < min_month_cursor:
+        month_cursor = min_month_cursor
+
     rows: list[list[InlineKeyboardButton]] = []
     noop_data = f"{callback_prefix}:noop"
     month_title = f"{MONTH_NAMES_RU[month_cursor.month - 1]} {month_cursor.year}"
@@ -55,6 +60,9 @@ def build_period_calendar_keyboard(
                 row.append(InlineKeyboardButton(text=" ", callback_data=noop_data))
                 continue
             day_date = date(month_cursor.year, month_cursor.month, day)
+            if day_date < today:
+                row.append(InlineKeyboardButton(text=" ", callback_data=noop_data))
+                continue
             row.append(
                 InlineKeyboardButton(
                     text=_render_day_text(day_date, checkin=checkin, checkout=checkout),
@@ -63,11 +71,12 @@ def build_period_calendar_keyboard(
             )
         rows.append(row)
 
-    prev_month = shift_month(month_cursor, -1).isoformat()
+    prev_month = shift_month(month_cursor, -1)
     next_month = shift_month(month_cursor, 1).isoformat()
+    prev_callback = noop_data if prev_month < min_month_cursor else f"{callback_prefix}:nav:{prev_month.isoformat()}"
     rows.append(
         [
-            InlineKeyboardButton(text="«", callback_data=f"{callback_prefix}:nav:{prev_month}"),
+            InlineKeyboardButton(text="«", callback_data=prev_callback),
             InlineKeyboardButton(text="»", callback_data=f"{callback_prefix}:nav:{next_month}"),
         ]
     )

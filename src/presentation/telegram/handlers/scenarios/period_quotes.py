@@ -134,6 +134,8 @@ class PeriodQuotesScenario:
         if session.state != ConversationState.AWAIT_QUOTES_CALENDAR or draft is None or draft.month_cursor is None:
             await query.answer()
             return
+        today = date.today()
+        min_month_cursor = today.replace(day=1)
 
         if data == "cal:noop":
             await query.answer()
@@ -142,10 +144,11 @@ class PeriodQuotesScenario:
         if data.startswith("cal:nav:"):
             raw = data.split(":", 2)[2]
             try:
-                draft.month_cursor = date.fromisoformat(raw).replace(day=1)
+                next_month_cursor = date.fromisoformat(raw).replace(day=1)
             except ValueError:
                 await query.answer()
                 return
+            draft.month_cursor = max(next_month_cursor, min_month_cursor)
             await query.answer()
             await query.edit_message_reply_markup(
                 reply_markup=build_period_quotes_calendar_inline_keyboard(
@@ -164,6 +167,17 @@ class PeriodQuotesScenario:
             picked = date.fromisoformat(data.split(":", 2)[2])
         except ValueError:
             await query.answer()
+            return
+        if picked < today:
+            draft.month_cursor = min_month_cursor
+            await query.answer("Нельзя выбрать прошедшую дату", show_alert=False)
+            await query.edit_message_reply_markup(
+                reply_markup=build_period_quotes_calendar_inline_keyboard(
+                    month_cursor=draft.month_cursor,
+                    checkin=draft.checkin,
+                    checkout=draft.checkout,
+                )
+            )
             return
 
         if draft.checkin is None:
