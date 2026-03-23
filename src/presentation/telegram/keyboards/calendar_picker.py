@@ -53,15 +53,11 @@ def build_period_calendar_keyboard(
     rows.append([InlineKeyboardButton(text=x, callback_data=noop_data) for x in WEEKDAY_SHORT_RU])
 
     cal = calendar.Calendar(firstweekday=0)
-    for week in cal.monthdayscalendar(month_cursor.year, month_cursor.month):
+    for week in cal.monthdatescalendar(month_cursor.year, month_cursor.month):
         row: list[InlineKeyboardButton] = []
-        for day in week:
-            if day == 0:
-                row.append(InlineKeyboardButton(text=" ", callback_data=noop_data))
-                continue
-            day_date = date(month_cursor.year, month_cursor.month, day)
-            if day_date < today:
-                row.append(InlineKeyboardButton(text=" ", callback_data=noop_data))
+        for day_date in week:
+            if day_date.month != month_cursor.month or day_date < today:
+                row.append(InlineKeyboardButton(text=_render_disabled_day_text(day_date), callback_data=noop_data))
                 continue
             row.append(
                 InlineKeyboardButton(
@@ -96,3 +92,7 @@ def _render_day_text(day_date: date, *, checkin: date | None, checkout: date | N
     if checkin < day_date < checkout:
         return f"({d})"
     return d
+
+
+def _render_disabled_day_text(day_date: date) -> str:
+    return "."

@@ -38,7 +38,9 @@ from src.presentation.telegram.callbacks.data_parser import (
     PREFIX_QUOTES_GROUP,
     PREFIX_QUOTES_OFFER,
     PREFIX_QUOTES_RESULT,
+    PREFIX_REGISTRATION_BANK,
     PREFIX_REGISTRATION_CATEGORY,
+    PREFIX_REGISTRATION_LOYALTY,
 )
 from src.presentation.telegram.handlers.dependencies import TelegramHandlersDependencies
 from src.presentation.telegram.handlers.scenario_registry import TelegramScenarioRegistry
@@ -270,6 +272,18 @@ class TelegramCallbackDispatcher:
                 return True
             await self._scenarios.registration.handle_categories_callback(user_id, query, data)
             return True
+        if data.startswith(PREFIX_REGISTRATION_LOYALTY):
+            if session_state != ConversationState.AWAIT_REG_LOYALTY:
+                await query.answer()
+                return True
+            await self._scenarios.registration.handle_registration_loyalty_callback(user_id, query, data)
+            return True
+        if data.startswith(PREFIX_REGISTRATION_BANK):
+            if session_state != ConversationState.AWAIT_REG_BANK:
+                await query.answer()
+                return True
+            await self._scenarios.registration.handle_registration_bank_callback(user_id, query, data)
+            return True
         if data.startswith(PREFIX_NOTIFIED_CATEGORY):
             await self._scenarios.available_offers.handle_notified_category_callback(user_id, query, data)
             return True
@@ -294,7 +308,12 @@ class TelegramCallbackDispatcher:
 
     @staticmethod
     def _is_registration_flow_callback(data: str, session_state: ConversationState) -> bool:
-        return data.startswith(PREFIX_REGISTRATION_CATEGORY) or session_state == ConversationState.EDIT_GROUPS
+        return (
+            data.startswith(PREFIX_REGISTRATION_CATEGORY)
+            or data.startswith(PREFIX_REGISTRATION_LOYALTY)
+            or data.startswith(PREFIX_REGISTRATION_BANK)
+            or session_state == ConversationState.EDIT_GROUPS
+        )
 
     @staticmethod
     def _is_admin_flow_callback(data: str) -> bool:

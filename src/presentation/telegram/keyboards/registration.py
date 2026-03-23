@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
 
+from src.presentation.telegram.callbacks.data_parser import PREFIX_REGISTRATION_BANK, PREFIX_REGISTRATION_LOYALTY
 from src.presentation.telegram.keyboards.main_menu import BACK_BUTTON, MAIN_MENU_BUTTON
 from src.presentation.telegram.ui_texts import BANK_LABEL_TO_CODE, CATEGORY_LABEL_TO_CODE, LOYALTY_OPTIONS
 
@@ -47,6 +48,28 @@ def build_registration_loyalty_keyboard() -> ReplyKeyboardMarkup:
     )
 
 
+def build_registration_loyalty_inline_keyboard() -> InlineKeyboardMarkup:
+    rows = [
+        [
+            InlineKeyboardButton(
+                text=REGISTRATION_LOYALTY_NO_STATUS_BUTTON,
+                callback_data=f"{PREFIX_REGISTRATION_LOYALTY}White",
+            ),
+            InlineKeyboardButton(text=LOYALTY_OPTIONS[0], callback_data=f"{PREFIX_REGISTRATION_LOYALTY}White"),
+        ],
+        [
+            InlineKeyboardButton(text=LOYALTY_OPTIONS[1], callback_data=f"{PREFIX_REGISTRATION_LOYALTY}{LOYALTY_OPTIONS[1]}"),
+            InlineKeyboardButton(text=LOYALTY_OPTIONS[2], callback_data=f"{PREFIX_REGISTRATION_LOYALTY}{LOYALTY_OPTIONS[2]}"),
+            InlineKeyboardButton(text=LOYALTY_OPTIONS[3], callback_data=f"{PREFIX_REGISTRATION_LOYALTY}{LOYALTY_OPTIONS[3]}"),
+        ],
+        [
+            InlineKeyboardButton(text=LOYALTY_OPTIONS[4], callback_data=f"{PREFIX_REGISTRATION_LOYALTY}{LOYALTY_OPTIONS[4]}"),
+            InlineKeyboardButton(text=LOYALTY_OPTIONS[5], callback_data=f"{PREFIX_REGISTRATION_LOYALTY}{LOYALTY_OPTIONS[5]}"),
+        ],
+    ]
+    return InlineKeyboardMarkup(rows)
+
+
 def build_registration_bank_keyboard() -> ReplyKeyboardMarkup:
     labels = list(BANK_LABEL_TO_CODE.keys())
     return ReplyKeyboardMarkup(
@@ -57,3 +80,16 @@ def build_registration_bank_keyboard() -> ReplyKeyboardMarkup:
         ],
         resize_keyboard=True,
     )
+
+
+def build_registration_bank_inline_keyboard() -> InlineKeyboardMarkup:
+    labels = list(BANK_LABEL_TO_CODE.keys())
+    rows = [
+        [InlineKeyboardButton(text=labels[0], callback_data=f"{PREFIX_REGISTRATION_BANK}none")],
+        [
+            InlineKeyboardButton(text=labels[1], callback_data=f"{PREFIX_REGISTRATION_BANK}{BANK_LABEL_TO_CODE[labels[1]]}"),
+            InlineKeyboardButton(text=labels[2], callback_data=f"{PREFIX_REGISTRATION_BANK}{BANK_LABEL_TO_CODE[labels[2]]}"),
+            InlineKeyboardButton(text=labels[3], callback_data=f"{PREFIX_REGISTRATION_BANK}{BANK_LABEL_TO_CODE[labels[3]]}"),
+        ],
+    ]
+    return InlineKeyboardMarkup(rows)

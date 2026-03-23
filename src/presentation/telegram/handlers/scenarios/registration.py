@@ -8,6 +8,8 @@ from src.presentation.telegram.callbacks.data_parser import (
     PREFIX_EDIT_FIELD,
     PREFIX_EDIT_LOYALTY,
     PREFIX_EDIT_NAV,
+    PREFIX_REGISTRATION_BANK,
+    PREFIX_REGISTRATION_LOYALTY,
 )
 from src.presentation.telegram.handlers.dependencies import TelegramHandlersDependencies
 from src.presentation.telegram.handlers.shared.navigation import send_main_menu_for_guest
@@ -28,10 +30,10 @@ from src.presentation.telegram.keyboards.main_menu import (
 )
 from src.presentation.telegram.keyboards.registration import (
     REGISTRATION_LOYALTY_NO_STATUS_BUTTON,
-    build_registration_bank_keyboard,
+    build_registration_bank_inline_keyboard,
     build_registration_categories_inline_keyboard,
+    build_registration_loyalty_inline_keyboard,
     build_registration_navigation_keyboard,
-    build_registration_loyalty_keyboard,
     build_registration_numeric_keyboard,
 )
 from src.presentation.telegram.mappers.value_parser import parse_decimal, parse_int
@@ -137,16 +139,16 @@ class RegistrationScenario:
         if session.state == ConversationState.AWAIT_REG_LOYALTY:
             normalized = _normalize_loyalty_selection(text)
             if normalized not in LOYALTY_OPTIONS:
-                await message.reply_text(render_loyalty_invalid(), reply_markup=build_registration_loyalty_keyboard())
+                await self._show_registration_loyalty_prompt(message, text=render_loyalty_invalid())
                 return
             reg.loyalty_status = normalized
             session.state = ConversationState.AWAIT_REG_BANK
-            await message.reply_text(render_bank_prompt(), reply_markup=build_registration_bank_keyboard())
+            await self._show_registration_bank_prompt(message)
             return
 
         if session.state == ConversationState.AWAIT_REG_BANK:
             if text not in BANK_LABEL_TO_CODE:
-                await message.reply_text(render_bank_invalid(), reply_markup=build_registration_bank_keyboard())
+                await self._show_registration_bank_prompt(message, text=render_bank_invalid())
                 return
             reg.bank_status = BANK_LABEL_TO_CODE[text] or None
             session.state = ConversationState.AWAIT_REG_DESIRED_PRICE
@@ -380,7 +382,7 @@ class RegistrationScenario:
                 await query.answer()
                 session.state = ConversationState.AWAIT_REG_LOYALTY
                 if query.message is not None:
-                    await query.message.reply_text(render_loyalty_prompt(), reply_markup=build_registration_loyalty_keyboard())
+                    await self._show_registration_loyalty_prompt(query.message)
             else:
                 guest_id = self._deps.identity.resolve_guest_id(telegram_user_id=telegram_user_id)
                 if guest_id:
@@ -424,6 +426,44 @@ class RegistrationScenario:
 
         await query.edit_message_reply_markup(reply_markup=build_edit_categories_inline_keyboard(selected_codes=reg.allowed_groups))
 
+    async def handle_registration_loyalty_callback(self, telegram_user_id: int, query, data: str) -> None:
+        session = await self._deps.sessions.get(telegram_user_id)
+        reg = session.registration
+        if session.state != ConversationState.AWAIT_REG_LOYALTY or reg is None:
+            await query.answer()
+            return
+
+        value = data.removeprefix(PREFIX_REGISTRATION_LOYALTY)
+        if value not in LOYALTY_OPTIONS:
+            await query.answer()
+            return
+
+        reg.loyalty_status = value
+        session.state = ConversationState.AWAIT_REG_BANK
+        await query.answer()
+        if query.message is not None:
+            await query.edit_message_reply_markup(reply_markup=None)
+            await self._show_registration_bank_prompt(query.message)
+
+    async def handle_registration_bank_callback(self, telegram_user_id: int, query, data: str) -> None:
+        session = await self._deps.sessions.get(telegram_user_id)
+        reg = session.registration
+        if session.state != ConversationState.AWAIT_REG_BANK or reg is None:
+            await query.answer()
+            return
+
+        value = data.removeprefix(PREFIX_REGISTRATION_BANK)
+        if value != "none" and value not in BANK_LABEL_TO_CODE.values():
+            await query.answer()
+            return
+
+        reg.bank_status = None if value == "none" else value
+        session.state = ConversationState.AWAIT_REG_DESIRED_PRICE
+        await query.answer()
+        if query.message is not None:
+            await query.edit_message_reply_markup(reply_markup=None)
+            await query.message.reply_text(render_price_prompt(), reply_markup=build_registration_numeric_keyboard())
+
     async def handle_back(self, telegram_user_id: int, message, guest_id: str | None) -> bool:
         session = await self._deps.sessions.get(telegram_user_id)
         if session.state == ConversationState.AWAIT_REG_CHILDREN_4_13:
@@ -449,11 +489,11 @@ class RegistrationScenario:
             return True
         if session.state == ConversationState.AWAIT_REG_BANK:
             session.state = ConversationState.AWAIT_REG_LOYALTY
-            await message.reply_text(render_loyalty_prompt(), reply_markup=build_registration_loyalty_keyboard())
+            await self._show_registration_loyalty_prompt(message)
             return True
         if session.state == ConversationState.AWAIT_REG_DESIRED_PRICE:
             session.state = ConversationState.AWAIT_REG_BANK
-            await message.reply_text(render_bank_prompt(), reply_markup=build_registration_bank_keyboard())
+            await self._show_registration_bank_prompt(message)
             return True
         if session.state == ConversationState.AWAIT_REG_ADULTS:
             await self._deps.flow_guard.leave(telegram_user_id)
@@ -515,12 +555,22 @@ class RegistrationScenario:
         }:
             return build_registration_numeric_keyboard()
         if state == ConversationState.AWAIT_REG_LOYALTY:
-            return build_registration_loyalty_keyboard()
+            return build_registration_navigation_keyboard()
         if state == ConversationState.AWAIT_REG_BANK:
-            return build_registration_bank_keyboard()
+            return build_registration_navigation_keyboard()
         if state == ConversationState.AWAIT_REG_GROUPS:
             return build_registration_navigation_keyboard()
         return build_registration_navigation_keyboard()
+
+    @staticmethod
+    async def _show_registration_loyalty_prompt(message, *, text: str | None = None) -> None:
+        prompt = text or render_loyalty_prompt()
+        await message.reply_text(prompt, reply_markup=build_registration_loyalty_inline_keyboard())
+
+    @staticmethod
+    async def _show_registration_bank_prompt(message, *, text: str | None = None) -> None:
+        prompt = text or render_bank_prompt()
+        await message.reply_text(prompt, reply_markup=build_registration_bank_inline_keyboard())
 
 
 def _normalize_loyalty_selection(value: str) -> str:
