@@ -57,6 +57,8 @@ class TelegramUseCasesDependencies:
     matches_run_repo: PostgresMatchesRunRepository
     desired_matches_run_repo: PostgresDesiredMatchesRunRepository
     notifications_repo: PostgresNotificationsRepository
+    proactive_notification_cooldown_days: int = 7
+    matches_lookahead_days: int = 90
     recalculation_coordinator: RecalculationRunCoordinator | None = None
 
 
@@ -77,6 +79,7 @@ class TelegramServicesContext:
     get_admin_reports_uc: GetAdminReports
     get_admin_statistics_uc: GetAdminStatistics
     prepare_notification_batches_uc: PrepareGuestNotificationBatches
+    matches_lookahead_days: int
     recalculation_coordinator: RecalculationRunCoordinator | None
     provider: str = "telegram"
 
@@ -151,7 +154,7 @@ class TelegramBaseFacade:
     ) -> str:
         today = date.today()
         actual_date_from = date_from or today
-        actual_date_to = date_to or (today + timedelta(days=90))
+        actual_date_to = date_to or (today + timedelta(days=self._ctx.matches_lookahead_days))
         actual_booking_date = booking_date or today
 
         loyalty_policy = LoyaltyPolicy(
@@ -437,7 +440,7 @@ class TelegramBestPeriodsFacade(TelegramBaseFacade):
             return []
 
         today = date.today()
-        rates = self._ctx.rates_repo.get_daily_rates(today, today + timedelta(days=90))
+        rates = self._ctx.rates_repo.get_daily_rates(today, today + timedelta(days=self._ctx.matches_lookahead_days))
         group_rules = self._ctx.rules_repo.get_group_rules()
         return find_group_categories_for_guest(
             daily_rates=rates,
@@ -458,7 +461,7 @@ class TelegramBestPeriodsFacade(TelegramBaseFacade):
             return None, []
 
         today = date.today()
-        date_to = today + timedelta(days=90)
+        date_to = today + timedelta(days=self._ctx.matches_lookahead_days)
         rates = self._ctx.rates_repo.get_daily_rates(today, date_to)
         offers = self._ctx.offers_repo.get_offers(today)
         group_rules = self._ctx.rules_repo.get_group_rules()
@@ -676,7 +679,9 @@ def build_telegram_presentation_services(*, deps: TelegramUseCasesDependencies) 
             guests_repo=deps.guests_repo,
             identities_repo=deps.identities_repo,
             provider="telegram",
+            reminder_cooldown_days=deps.proactive_notification_cooldown_days,
         ),
+        matches_lookahead_days=deps.matches_lookahead_days,
         recalculation_coordinator=deps.recalculation_coordinator,
     )
     return TelegramPresentationServices(

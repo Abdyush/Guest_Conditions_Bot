@@ -17,6 +17,8 @@ class TelegramRuntimeSettings:
     selenium_headless: bool
     selenium_wait_seconds: int
     timezone_name: str
+    proactive_notification_cooldown_days: int
+    matches_lookahead_days: int
 
 
 def load_telegram_settings() -> TelegramSettings:
@@ -43,6 +45,8 @@ def load_telegram_runtime_settings() -> TelegramRuntimeSettings:
     selenium_headless = os.getenv("SELENIUM_VISIBLE", "").strip().lower() not in {"1", "true", "yes"}
     selenium_wait_seconds = int(os.getenv("SELENIUM_WAIT_SECONDS", "20"))
     timezone_name = os.getenv("BOT_TIMEZONE", "Europe/Moscow")
+    proactive_notification_cooldown_days = max(0, int(os.getenv("PROACTIVE_NOTIFICATION_COOLDOWN_DAYS", "7")))
+    matches_lookahead_days = max(1, int(os.getenv("MATCHES_LOOKAHEAD_DAYS", "90")))
 
     return TelegramRuntimeSettings(
         bot_token=token,
@@ -51,4 +55,6 @@ def load_telegram_runtime_settings() -> TelegramRuntimeSettings:
         selenium_headless=selenium_headless,
         selenium_wait_seconds=selenium_wait_seconds,
         timezone_name=timezone_name,
+        proactive_notification_cooldown_days=proactive_notification_cooldown_days,
+        matches_lookahead_days=matches_lookahead_days,
     )

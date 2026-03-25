@@ -18,10 +18,15 @@ class PrepareGuestNotificationBatches:
     guests_repo: GuestsRepository
     identities_repo: UserIdentitiesRepository
     provider: str = "telegram"
+    reminder_cooldown_days: int = 7
 
     def execute(self, *, run_id: str, as_of_date: date) -> list[GuestNotificationBatch]:
         rows = self.desired_matches_repo.get_run_rows(run_id)
-        new_rows = self.notifications_repo.filter_new(rows, as_of_date=as_of_date)
+        new_rows = self.notifications_repo.filter_new(
+            rows,
+            as_of_date=as_of_date,
+            cooldown_days=self.reminder_cooldown_days,
+        )
         if not new_rows:
             return []
 

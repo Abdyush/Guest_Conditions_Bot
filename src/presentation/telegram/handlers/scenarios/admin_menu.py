@@ -234,8 +234,8 @@ class AdminMenuScenario:
 
     async def _handle_system_callback(self, *, telegram_user_id: int, query, data: str) -> None:
         if data == ADMIN_SYSTEM_RATES:
-            attempt = await self._deps.pipeline.run_categories_parser(trigger=f"admin_menu:{telegram_user_id}:rates")
             await query.answer()
+            attempt = await self._deps.pipeline.run_categories_parser(trigger=f"admin_menu:{telegram_user_id}:rates")
             if query.message is not None:
                 await query.edit_message_text(
                     render_system_attempt_result(
@@ -247,8 +247,8 @@ class AdminMenuScenario:
                 )
             return
         if data == ADMIN_SYSTEM_OFFERS:
-            attempt = await self._deps.pipeline.run_offers_parser(trigger=f"admin_menu:{telegram_user_id}:offers")
             await query.answer()
+            attempt = await self._deps.pipeline.run_offers_parser(trigger=f"admin_menu:{telegram_user_id}:offers")
             if query.message is not None:
                 await query.edit_message_text(
                     render_system_attempt_result(
@@ -260,8 +260,8 @@ class AdminMenuScenario:
                 )
             return
         if data == ADMIN_SYSTEM_RECALC:
-            attempt = await self._deps.pipeline.run_recalculation(trigger=f"admin_menu:{telegram_user_id}:recalculation")
             await query.answer()
+            attempt = await self._deps.pipeline.run_recalculation(trigger=f"admin_menu:{telegram_user_id}:recalculation")
             if query.message is not None:
                 await query.edit_message_text(
                     render_system_attempt_result(

@@ -50,7 +50,7 @@ def build_telegram_runtime(*, settings: TelegramRuntimeSettings | None = None) -
     redis_storage = RedisStorage.from_url(runtime_settings.redis_url)
     sessions = InMemorySessionStore(storage=redis_storage)
 
-    deps = _build_adapter_dependencies()
+    deps = _build_adapter_dependencies(runtime_settings=runtime_settings)
     services = build_telegram_presentation_services(deps=deps)
     rates_runner = SeleniumRatesParserRunner(
         rules_repo=deps.rules_repo,
@@ -67,9 +67,11 @@ def build_telegram_runtime(*, settings: TelegramRuntimeSettings | None = None) -
         admin=services.admin,
         system=services.system,
         notifications=services.notifications,
+        latest_runs=deps.desired_matches_run_repo,
         notification_delivery=TelegramNotificationDelivery(),
         rates_runner=rates_runner,
         offers_runner=offers_runner,
+        matches_lookahead_days=runtime_settings.matches_lookahead_days,
     )
     handlers = TelegramBotHandlers(
         services=services,
@@ -87,7 +89,7 @@ def build_telegram_runtime(*, settings: TelegramRuntimeSettings | None = None) -
     )
 
 
-def _build_adapter_dependencies() -> TelegramUseCasesDependencies:
+def _build_adapter_dependencies(*, runtime_settings: TelegramRuntimeSettings) -> TelegramUseCasesDependencies:
     lock_key = int(os.getenv("RECALC_ADVISORY_LOCK_KEY", "90412031"))
     return TelegramUseCasesDependencies(
         identities_repo=PostgresUserIdentitiesRepository(),
@@ -100,6 +102,8 @@ def _build_adapter_dependencies() -> TelegramUseCasesDependencies:
         matches_run_repo=PostgresMatchesRunRepository(),
         desired_matches_run_repo=PostgresDesiredMatchesRunRepository(),
         notifications_repo=PostgresNotificationsRepository(),
+        proactive_notification_cooldown_days=runtime_settings.proactive_notification_cooldown_days,
+        matches_lookahead_days=runtime_settings.matches_lookahead_days,
         recalculation_coordinator=RecalculationRunCoordinator(advisory_lock_key=lock_key),
     )
 

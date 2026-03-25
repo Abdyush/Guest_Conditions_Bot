@@ -13,18 +13,26 @@ from src.presentation.telegram.bootstrap.handlers import register_telegram_handl
 from src.presentation.telegram.bootstrap.runtime import TelegramRuntime, build_telegram_runtime
 
 
-async def _run_daily_fallback(*, application: Application, runtime: TelegramRuntime) -> None:
+async def _run_daily_fallback(
+    *,
+    application: Application,
+    runtime: TelegramRuntime,
+    hour: int,
+    minute: int,
+    callback,
+    log_label: str,
+) -> None:
     logger = logging.getLogger(__name__)
     while True:
         now = datetime.now(runtime.bot_tz)
-        target = datetime.combine(now.date(), dt_time(hour=3, minute=0), tzinfo=runtime.bot_tz)
+        target = datetime.combine(now.date(), dt_time(hour=hour, minute=minute), tzinfo=runtime.bot_tz)
         if now >= target:
             target = target + timedelta(days=1)
         sleep_seconds = max(1.0, (target - now).total_seconds())
         await asyncio.sleep(sleep_seconds)
-        attempt = await runtime.pipeline.run_daily_pipeline(bot=application.bot, trigger="scheduled_fallback")
+        attempt = await callback(application.bot)
         if not attempt.started:
-            logger.warning("scheduled_fallback_skip reason=%s", attempt.message)
+            logger.warning("%s_skip reason=%s", log_label, attempt.message)
 
 
 async def _flush_sessions_loop(*, runtime: TelegramRuntime) -> None:
@@ -89,17 +97,50 @@ def _build_post_init(*, runtime: TelegramRuntime):
                 time=dt_time(hour=3, minute=0, tzinfo=runtime.bot_tz),
                 name="nightly_pipeline",
             )
+            job_queue.run_daily(
+                _build_notifications_job(runtime=runtime),
+                time=dt_time(hour=12, minute=0, tzinfo=runtime.bot_tz),
+                name="midday_notifications",
+            )
             logging.getLogger(__name__).info(
                 "scheduler_registered job=nightly_pipeline time=03:00 timezone=%s",
                 str(runtime.bot_tz),
             )
+            logging.getLogger(__name__).info(
+                "scheduler_registered job=midday_notifications time=12:00 timezone=%s",
+                str(runtime.bot_tz),
+            )
             return
         logging.getLogger(__name__).warning(
-            "scheduler_fallback_enabled reason=job_queue_missing time=03:00 timezone=%s",
+            "scheduler_fallback_enabled reason=job_queue_missing jobs=nightly_pipeline,midday_notifications timezone=%s",
             str(runtime.bot_tz),
         )
         application.bot_data["nightly_fallback_task"] = asyncio.create_task(
-            _run_daily_fallback(application=application, runtime=runtime)
+            _run_daily_fallback(
+                application=application,
+                runtime=runtime,
+                hour=3,
+                minute=0,
+                callback=lambda bot: runtime.pipeline.run_daily_pipeline(
+                    bot=bot,
+                    trigger="scheduled_fallback",
+                    with_notifications=False,
+                ),
+                log_label="scheduled_fallback_nightly",
+            )
+        )
+        application.bot_data["midday_notifications_fallback_task"] = asyncio.create_task(
+            _run_daily_fallback(
+                application=application,
+                runtime=runtime,
+                hour=12,
+                minute=0,
+                callback=lambda bot: runtime.pipeline.run_notifications_only(
+                    bot=bot,
+                    trigger="scheduled_notifications_fallback",
+                ),
+                log_label="scheduled_fallback_notifications",
+            )
         )
 
     return post_init
@@ -122,6 +163,13 @@ def _build_post_shutdown(*, runtime: TelegramRuntime):
                 await task
             except asyncio.CancelledError:
                 pass
+        notifications_task = application.bot_data.get("midday_notifications_fallback_task")
+        if notifications_task is not None:
+            notifications_task.cancel()
+            try:
+                await notifications_task
+            except asyncio.CancelledError:
+                pass
         await runtime.sessions.close()
 
     return post_shutdown
@@ -129,8 +177,24 @@ def _build_post_shutdown(*, runtime: TelegramRuntime):
 
 def _build_nightly_job(*, runtime: TelegramRuntime):
     async def run_nightly_pipeline(context) -> None:
-        attempt = await runtime.pipeline.run_daily_pipeline(bot=context.bot, trigger="scheduled")
+        attempt = await runtime.pipeline.run_daily_pipeline(
+            bot=context.bot,
+            trigger="scheduled",
+            with_notifications=False,
+        )
         if not attempt.started:
             logging.getLogger(__name__).warning("scheduled_skip reason=%s", attempt.message)
 
     return run_nightly_pipeline
+
+
+def _build_notifications_job(*, runtime: TelegramRuntime):
+    async def run_notifications(context) -> None:
+        attempt = await runtime.pipeline.run_notifications_only(
+            bot=context.bot,
+            trigger="scheduled_notifications",
+        )
+        if not attempt.started:
+            logging.getLogger(__name__).warning("scheduled_notifications_skip reason=%s", attempt.message)
+
+    return run_notifications

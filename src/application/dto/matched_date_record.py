@@ -26,3 +26,4 @@ class MatchedDateRecord:
     availability_end: date
     computed_at: datetime
     period_end: date | None = None
+    notified_at: datetime | None = None

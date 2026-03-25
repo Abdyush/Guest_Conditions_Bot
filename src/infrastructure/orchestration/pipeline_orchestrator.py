@@ -8,6 +8,7 @@ from typing import Protocol, Sequence
 
 from src.application.dto.guest_notification_batch import GuestNotificationBatch
 from src.application.dto.matched_date_record import MatchedDateRecord
+from src.application.ports.matches_run_repository import MatchesRunRepository
 from src.infrastructure.parsers.selenium_offers_parser_runner import SeleniumOffersParserRunner
 from src.infrastructure.parsers.selenium_rates_parser_runner import SeleniumRatesParserRunner
 
@@ -72,20 +73,24 @@ class PipelineOrchestrator:
         admin: AdminEventLogger,
         system: SystemRecalculationPort,
         notifications: NotificationsPort,
+        latest_runs: MatchesRunRepository,
         notification_delivery: NotificationDelivery,
         rates_runner: SeleniumRatesParserRunner,
         offers_runner: SeleniumOffersParserRunner,
+        matches_lookahead_days: int = 90,
     ):
         self._admin = admin
         self._system = system
         self._notifications = notifications
+        self._latest_runs = latest_runs
         self._notification_delivery = notification_delivery
         self._rates_runner = rates_runner
         self._offers_runner = offers_runner
+        self._matches_lookahead_days = matches_lookahead_days
         self._run_lock = asyncio.Lock()
         self._active_run_name = "idle"
 
-    async def run_daily_pipeline(self, *, bot: object | None, trigger: str) -> RunAttempt:
+    async def run_daily_pipeline(self, *, bot: object | None, trigger: str, with_notifications: bool = True) -> RunAttempt:
         if self._run_lock.locked():
             self._admin.log_admin_event(
                 event_type="pipeline_run",
@@ -98,7 +103,7 @@ class PipelineOrchestrator:
             self._active_run_name = "nightly_pipeline"
             try:
                 today = date.today()
-                end_date = today + timedelta(days=29)
+                end_date = today + timedelta(days=self._matches_lookahead_days - 1)
                 logger.info("pipeline_start trigger=%s date_from=%s date_to=%s", trigger, today.isoformat(), end_date.isoformat())
 
                 try:
@@ -106,7 +111,7 @@ class PipelineOrchestrator:
                     rates_count = await asyncio.to_thread(
                         self._rates_runner.run,
                         start_date=today,
-                        days_to_collect=30,
+                        days_to_collect=self._matches_lookahead_days,
                         adults_counts=(1, 2, 3, 4, 5, 6),
                     )
                     logger.info("parser_categories_finish trigger=%s rows=%s", trigger, rates_count)
@@ -172,9 +177,11 @@ class PipelineOrchestrator:
                     )
                     raise
 
-                logger.info("notifications_start trigger=%s run_id=%s", trigger, run_id)
-                notified = await self._notify_guests(bot=bot, run_id=run_id)
-                logger.info("notifications_finish trigger=%s run_id=%s notified=%s", trigger, run_id, notified)
+                notified = 0
+                if with_notifications:
+                    logger.info("notifications_start trigger=%s run_id=%s", trigger, run_id)
+                    notified = await self._notify_guests(bot=bot, run_id=run_id)
+                    logger.info("notifications_finish trigger=%s run_id=%s notified=%s", trigger, run_id, notified)
                 logger.info("pipeline_finish trigger=%s run_id=%s", trigger, run_id)
                 self._admin.log_admin_event(
                     event_type="pipeline_run",
@@ -187,6 +194,50 @@ class PipelineOrchestrator:
                 logger.exception("pipeline_error trigger=%s", trigger)
                 self._admin.log_admin_event(
                     event_type="pipeline_run",
+                    status="error",
+                    trigger=trigger,
+                    message="error",
+                )
+                return RunAttempt(False, "error")
+            finally:
+                self._active_run_name = "idle"
+
+    async def run_notifications_only(self, *, bot: object | None, trigger: str) -> RunAttempt:
+        if self._run_lock.locked():
+            self._admin.log_admin_event(
+                event_type="notifications_run",
+                status="busy",
+                trigger=trigger,
+                message=f"busy:{self._active_run_name}",
+            )
+            return RunAttempt(False, f"busy:{self._active_run_name}")
+        async with self._run_lock:
+            self._active_run_name = "notifications_only"
+            try:
+                run_id = await asyncio.to_thread(self._latest_runs.get_latest_run_id)
+                if not run_id:
+                    self._admin.log_admin_event(
+                        event_type="notifications_run",
+                        status="success",
+                        trigger=trigger,
+                        message="run_id=none;notified=0",
+                    )
+                    return RunAttempt(False, "no_run")
+
+                logger.info("notifications_start trigger=%s run_id=%s", trigger, run_id)
+                notified = await self._notify_guests(bot=bot, run_id=run_id)
+                logger.info("notifications_finish trigger=%s run_id=%s notified=%s", trigger, run_id, notified)
+                self._admin.log_admin_event(
+                    event_type="notifications_run",
+                    status="success",
+                    trigger=trigger,
+                    message=f"run_id={run_id};notified={notified}",
+                )
+                return RunAttempt(True, f"ok:{run_id}")
+            except Exception:
+                logger.exception("notifications_only_error trigger=%s", trigger)
+                self._admin.log_admin_event(
+                    event_type="notifications_run",
                     status="error",
                     trigger=trigger,
                     message="error",
@@ -213,7 +264,7 @@ class PipelineOrchestrator:
                 rows = await asyncio.to_thread(
                     self._rates_runner.run,
                     start_date=today,
-                    days_to_collect=30,
+                    days_to_collect=self._matches_lookahead_days,
                     adults_counts=(1, 2, 3, 4, 5, 6),
                 )
                 logger.info("parser_categories_finish trigger=%s rows=%s", trigger, rows)
@@ -288,7 +339,7 @@ class PipelineOrchestrator:
             self._active_run_name = "recalculation"
             try:
                 today = date.today()
-                end_date = today + timedelta(days=29)
+                end_date = today + timedelta(days=self._matches_lookahead_days - 1)
                 run_id = await asyncio.to_thread(
                     self._system.recalculate_matches,
                     date_from=today,

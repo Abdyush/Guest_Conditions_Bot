@@ -4,7 +4,7 @@ from __future__ import annotations
 BUTTONS = {
     "best_period": "📉 Самый выгодный период",
     "period_quotes": "📅 Цены на период",
-    "available_rooms": "🏨 Доступные номера",
+    "available_rooms": "🏨 Мои доступные категории",
     "edit_data": "⚙️ Редактировать данные",
 
     "back": "⬅️ Назад",

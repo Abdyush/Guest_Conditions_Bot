@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import os
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
+from typing import NamedTuple
 
 from sqlalchemy import BIGINT, INTEGER, NUMERIC, TEXT, TIMESTAMP, Column, MetaData, Table, create_engine, delete, select, text
 from sqlalchemy.dialects.postgresql import insert
@@ -34,7 +35,13 @@ notifications_table = Table(
     Column("bank_status", TEXT, nullable=True),
     Column("bank_percent", NUMERIC(5, 4), nullable=True),
     Column("computed_at", TIMESTAMP, nullable=False),
+    Column("notified_at", TIMESTAMP, nullable=True),
 )
+
+
+class _NotificationState(NamedTuple):
+    last_notified_at: datetime
+    last_notified_price_minor: int
 
 
 class PostgresNotificationsRepository(NotificationsRepository):
@@ -48,18 +55,23 @@ class PostgresNotificationsRepository(NotificationsRepository):
     @staticmethod
     def _init_schema(engine: Engine) -> None:
         metadata.create_all(engine)
-        ddl = """
-        CREATE UNIQUE INDEX IF NOT EXISTS uq_notifications_period
-        ON notifications(
-            guest_id, availability_period, period_label, category_name, group_id, tariff,
-            old_price_minor, new_price_minor, coalesce(offer_id, ''), coalesce(loyalty_status, ''),
-            coalesce(bank_status, '')
-        );
-        """
         with engine.begin() as conn:
-            conn.execute(text(ddl))
+            conn.execute(text("ALTER TABLE notifications ADD COLUMN IF NOT EXISTS notified_at TIMESTAMP"))
+            conn.execute(text("DROP INDEX IF EXISTS uq_notifications_period"))
+            conn.execute(
+                text(
+                    """
+                    CREATE UNIQUE INDEX IF NOT EXISTS uq_notifications_period
+                    ON notifications(
+                        guest_id, availability_period, period_label, category_name, group_id, tariff,
+                        old_price_minor, new_price_minor, coalesce(offer_id, ''), coalesce(loyalty_status, ''),
+                        coalesce(bank_status, ''), coalesce(notified_at, computed_at)
+                    )
+                    """
+                )
+            )
 
-    def filter_new(self, rows: list[MatchedDateRecord], *, as_of_date: date) -> list[MatchedDateRecord]:
+    def filter_new(self, rows: list[MatchedDateRecord], *, as_of_date: date, cooldown_days: int) -> list[MatchedDateRecord]:
         if not rows:
             self._prune_and_normalize_existing(as_of_date)
             return []
@@ -70,17 +82,59 @@ class PostgresNotificationsRepository(NotificationsRepository):
         if not normalized_rows:
             return []
 
-        existing_keys: set[tuple] = set()
+        existing_states: dict[tuple[str, str, str, str], _NotificationState] = {}
         with self._engine.connect() as conn:
             for row in conn.execute(select(notifications_table)).mappings():
-                existing_keys.add(self._key_from_db_row(row))
+                rec = self._from_db_row(row)
+                logical_key = self._logical_key(rec)
+                notified_at = rec.notified_at or rec.computed_at
+                state = existing_states.get(logical_key)
+                if state is None or notified_at > state.last_notified_at:
+                    existing_states[logical_key] = _NotificationState(
+                        last_notified_at=notified_at,
+                        last_notified_price_minor=rec.new_price_minor,
+                    )
+                elif notified_at == state.last_notified_at and rec.new_price_minor < state.last_notified_price_minor:
+                    existing_states[logical_key] = _NotificationState(
+                        last_notified_at=state.last_notified_at,
+                        last_notified_price_minor=rec.new_price_minor,
+                    )
 
-        return [row for row in normalized_rows if self._key(row) not in existing_keys]
+        rows_by_logical_key: dict[tuple[str, str, str, str], list[MatchedDateRecord]] = {}
+        for row in normalized_rows:
+            rows_by_logical_key.setdefault(self._logical_key(row), []).append(row)
+
+        out: list[MatchedDateRecord] = []
+        for logical_key, logical_rows in rows_by_logical_key.items():
+            state = existing_states.get(logical_key)
+            current_best_price = min(row.new_price_minor for row in logical_rows)
+            best_rows = [
+                row
+                for row in logical_rows
+                if row.new_price_minor == current_best_price
+            ]
+            if state is None:
+                out.extend(best_rows)
+                continue
+
+            if current_best_price < state.last_notified_price_minor:
+                out.extend(best_rows)
+                continue
+
+            if self._cooldown_elapsed(
+                as_of_date=as_of_date,
+                last_notified_at=state.last_notified_at,
+                cooldown_days=cooldown_days,
+            ):
+                out.extend(best_rows)
+
+        return out
 
     def mark_sent(self, rows: list[MatchedDateRecord], *, run_id: str) -> None:
         if not rows:
             return
-        values = [self._to_row(run_id, row) for row in rows]
+        notified_at = datetime.now()
+        values = [self._to_row(run_id, row, notified_at=notified_at) for row in rows]
         stmt = insert(notifications_table).values(values).on_conflict_do_nothing()
         with self._engine.begin() as conn:
             conn.execute(stmt)
@@ -110,12 +164,8 @@ class PostgresNotificationsRepository(NotificationsRepository):
                 rows_to_keep.append((row["run_id"], normalized))
 
             rows_serialized: list[dict] = []
-            by_run: dict[str, list[MatchedDateRecord]] = {}
             for run_id, rec in rows_to_keep:
-                by_run.setdefault(run_id, []).append(rec)
-            for run_id, grouped_rows in by_run.items():
-                for rec in self._aggregate_rows(grouped_rows):
-                    rows_serialized.append(self._to_row(run_id, rec))
+                rows_serialized.append(self._to_row(run_id, rec, notified_at=rec.notified_at))
 
             if rows_serialized:
                 stmt = insert(notifications_table).values(rows_serialized).on_conflict_do_nothing()
@@ -154,10 +204,11 @@ class PostgresNotificationsRepository(NotificationsRepository):
             availability_end=avail_end_inclusive + timedelta(days=1),
             computed_at=row.computed_at,
             period_end=period_end,
+            notified_at=row.notified_at,
         )
 
     @staticmethod
-    def _to_row(run_id: str, row: MatchedDateRecord) -> dict:
+    def _to_row(run_id: str, row: MatchedDateRecord, *, notified_at: datetime | None) -> dict:
         period_end = row.period_end or row.date
         period_label = f"{row.date.isoformat()} - {period_end.isoformat()}"
         availability_end_inclusive = row.availability_end - timedelta(days=1)
@@ -181,6 +232,7 @@ class PostgresNotificationsRepository(NotificationsRepository):
             "bank_status": row.bank_status,
             "bank_percent": row.bank_percent,
             "computed_at": row.computed_at,
+            "notified_at": notified_at,
         }
 
     @staticmethod
@@ -212,28 +264,16 @@ class PostgresNotificationsRepository(NotificationsRepository):
             availability_end=avail_end_inclusive + timedelta(days=1),
             computed_at=row["computed_at"],
             period_end=period_end,
+            notified_at=row.get("notified_at"),
         )
 
-    @classmethod
-    def _key_from_db_row(cls, row) -> tuple:
-        return cls._key(cls._from_db_row(row))
-
     @staticmethod
-    def _key(row: MatchedDateRecord) -> tuple:
+    def _logical_key(row: MatchedDateRecord) -> tuple[str, str, str, str]:
         return (
             row.guest_id,
-            row.date,
-            row.period_end or row.date,
-            row.availability_start,
-            row.availability_end,
             row.category_name,
             row.group_id,
-            row.tariff,
-            row.old_price_minor,
-            row.new_price_minor,
-            row.offer_id or "",
-            row.loyalty_status or "",
-            row.bank_status or "",
+            row.tariff.strip().lower(),
         )
 
     @staticmethod
@@ -292,6 +332,7 @@ class PostgresNotificationsRepository(NotificationsRepository):
                     availability_end=current_base.availability_end,
                     computed_at=current_base.computed_at,
                     period_end=current_end,
+                    notified_at=current_base.notified_at,
                 )
             )
 
@@ -310,3 +351,9 @@ class PostgresNotificationsRepository(NotificationsRepository):
 
         flush()
         return out
+
+    @staticmethod
+    def _cooldown_elapsed(*, as_of_date: date, last_notified_at: datetime, cooldown_days: int) -> bool:
+        if cooldown_days <= 0:
+            return True
+        return (as_of_date - last_notified_at.date()).days >= cooldown_days
