@@ -60,12 +60,49 @@ def test_runner_processes_each_day_in_two_sequential_batches(monkeypatch):
     out = runner.run(start_date=start_date)
 
     assert calls == [
-        ((1, 2, 3), (date(2026, 4, 1),), (1, 2)),
-        ((4, 5, 6), (date(2026, 4, 1),), (1, 2)),
-        ((1, 2, 3), (date(2026, 4, 2),), (2, 2)),
-        ((4, 5, 6), (date(2026, 4, 2),), (2, 2)),
+        ((1, 2), (date(2026, 4, 1),), (1, 2)),
+        ((3, 4), (date(2026, 4, 1),), (1, 2)),
+        ((5, 6), (date(2026, 4, 1),), (1, 2)),
+        ((1, 2), (date(2026, 4, 2),), (2, 2)),
+        ((3, 4), (date(2026, 4, 2),), (2, 2)),
+        ((5, 6), (date(2026, 4, 2),), (2, 2)),
     ]
     assert len(out) == 12
+
+
+def test_runner_sleeps_between_batches(monkeypatch):
+    monkeypatch.setitem(sys.modules, "selenium", types.SimpleNamespace(webdriver=object()))
+
+    sleeps: list[float] = []
+
+    def fake_run_batch(self, *, webdriver, category_to_group, adults_counts, stay_dates, day_numbering=None):
+        return [
+            ParserRunOutcome(
+                adults_count=adults_count,
+                rates=(_rate(stay_date=stay_dates[0], adults_count=adults_count),),
+                total_found=1,
+                total_collected=1,
+                failed_fn=None,
+                elapsed_seconds=1.0,
+            )
+            for adults_count in adults_counts
+        ]
+
+    monkeypatch.setattr(SeleniumRatesParallelRunner, "_run_batch", fake_run_batch)
+    monkeypatch.setattr("src.infrastructure.selenium.rates_parallel_runner.sleep", sleeps.append)
+
+    runner = SeleniumRatesParallelRunner(
+        RatesParallelRunConfig(
+            category_to_group={"Category": "DELUXE"},
+            adults_counts=(1, 2, 3, 4, 5, 6),
+            days_to_collect=1,
+            batch_pause_seconds=3.0,
+        )
+    )
+
+    runner.run(start_date=date(2026, 4, 1))
+
+    assert sleeps == [3.0, 3.0]
 
 
 def test_parser_runner_publishes_snapshot_once_after_full_run(monkeypatch):
@@ -113,6 +150,9 @@ def test_parser_runner_publishes_snapshot_once_after_full_run(monkeypatch):
     assert isinstance(captured["config"], RatesParallelRunConfig)
     assert captured["config"].days_to_collect == 90
     assert captured["config"].adults_counts == (1, 2, 3, 4, 5, 6)
+    assert captured["config"].batch_pause_seconds == 3.0
+    assert captured["config"].retry_count == 1
+    assert captured["config"].retry_pause_seconds == 1.0
     assert captured["replace_calls"] == [rates]
 
 
@@ -158,3 +198,60 @@ def test_aggregate_outcomes_tracks_partial_failures_by_day():
     assert stat.total_collected == 4
     assert stat.total_elapsed_seconds == 13.0
     assert stat.errors == ((date(2026, 4, 2), "_find_categories"),)
+
+
+def test_run_batch_retries_only_failed_worker_without_duplicate_rows(monkeypatch):
+    attempts: dict[int, int] = {}
+    sleeps: list[float] = []
+
+    def fake_run_single_parser(self, *, webdriver, category_to_group, adults_count, stay_dates, day_numbering=None):
+        attempts[adults_count] = attempts.get(adults_count, 0) + 1
+        stay_date = stay_dates[0]
+        if adults_count == 4 and attempts[adults_count] == 1:
+            return ParserRunOutcome(
+                adults_count=adults_count,
+                rates=(_rate(stay_date=stay_date, adults_count=40),),
+                stay_date=stay_date,
+                total_found=1,
+                total_collected=1,
+                failed_fn="get_rates_for_date",
+                elapsed_seconds=1.0,
+            )
+        return ParserRunOutcome(
+            adults_count=adults_count,
+            rates=(_rate(stay_date=stay_date, adults_count=adults_count),),
+            stay_date=stay_date,
+            total_found=1,
+            total_collected=1,
+            failed_fn=None,
+            elapsed_seconds=1.0,
+        )
+
+    monkeypatch.setattr(SeleniumRatesParallelRunner, "_run_single_parser", fake_run_single_parser)
+    monkeypatch.setattr("src.infrastructure.selenium.rates_parallel_runner.sleep", sleeps.append)
+
+    runner = SeleniumRatesParallelRunner(
+        RatesParallelRunConfig(
+            category_to_group={"Category": "DELUXE"},
+            adults_counts=(3, 4),
+            days_to_collect=1,
+            retry_count=1,
+            retry_pause_seconds=1.5,
+        )
+    )
+
+    outcomes = runner._run_batch(
+        webdriver=object(),
+        category_to_group={"Category": "DELUXE"},
+        adults_counts=(3, 4),
+        stay_dates=[date(2026, 4, 1)],
+        day_numbering=(1, 1),
+    )
+
+    by_adults = {outcome.adults_count: outcome for outcome in outcomes}
+    assert attempts == {3: 1, 4: 2}
+    assert sleeps == [1.5]
+    assert by_adults[3].failed_fn is None
+    assert by_adults[4].failed_fn is None
+    assert len(by_adults[4].rates) == 1
+    assert by_adults[4].rates[0].adults_count == 4

@@ -19,6 +19,9 @@ class TelegramRuntimeSettings:
     timezone_name: str
     proactive_notification_cooldown_days: int
     matches_lookahead_days: int
+    rates_parser_batch_pause_seconds: float
+    rates_parser_retry_count: int
+    rates_parser_retry_pause_seconds: float
 
 
 def load_telegram_settings() -> TelegramSettings:
@@ -47,6 +50,9 @@ def load_telegram_runtime_settings() -> TelegramRuntimeSettings:
     timezone_name = os.getenv("BOT_TIMEZONE", "Europe/Moscow")
     proactive_notification_cooldown_days = max(0, int(os.getenv("PROACTIVE_NOTIFICATION_COOLDOWN_DAYS", "7")))
     matches_lookahead_days = max(1, int(os.getenv("MATCHES_LOOKAHEAD_DAYS", "90")))
+    rates_parser_batch_pause_seconds = max(0.0, float(os.getenv("RATES_PARSER_BATCH_PAUSE_SECONDS", "3")))
+    rates_parser_retry_count = max(0, int(os.getenv("RATES_PARSER_RETRY_COUNT", "1")))
+    rates_parser_retry_pause_seconds = max(0.0, float(os.getenv("RATES_PARSER_RETRY_PAUSE_SECONDS", "1")))
 
     return TelegramRuntimeSettings(
         bot_token=token,
@@ -57,4 +63,7 @@ def load_telegram_runtime_settings() -> TelegramRuntimeSettings:
         timezone_name=timezone_name,
         proactive_notification_cooldown_days=proactive_notification_cooldown_days,
         matches_lookahead_days=matches_lookahead_days,
+        rates_parser_batch_pause_seconds=rates_parser_batch_pause_seconds,
+        rates_parser_retry_count=rates_parser_retry_count,
+        rates_parser_retry_pause_seconds=rates_parser_retry_pause_seconds,
     )

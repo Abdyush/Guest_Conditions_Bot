@@ -56,6 +56,9 @@ def build_telegram_runtime(*, settings: TelegramRuntimeSettings | None = None) -
         rules_repo=deps.rules_repo,
         headless=runtime_settings.selenium_headless,
         wait_seconds=runtime_settings.selenium_wait_seconds,
+        batch_pause_seconds=runtime_settings.rates_parser_batch_pause_seconds,
+        retry_count=runtime_settings.rates_parser_retry_count,
+        retry_pause_seconds=runtime_settings.rates_parser_retry_pause_seconds,
     )
     offers_runner = SeleniumOffersParserRunner(
         rules_repo=deps.rules_repo,

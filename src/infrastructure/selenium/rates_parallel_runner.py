@@ -4,7 +4,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import date, timedelta
 from threading import Lock
-from time import perf_counter
+from time import perf_counter, sleep
 from types import TracebackType
 
 from src.domain.entities.rate import DailyRate
@@ -20,6 +20,9 @@ class RatesParallelRunConfig:
     days_to_collect: int = 3
     headless: bool = True
     wait_seconds: int = 20
+    batch_pause_seconds: float = 3.0
+    retry_count: int = 1
+    retry_pause_seconds: float = 1.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,6 +63,12 @@ class SeleniumRatesParallelRunner:
         for adults in config.adults_counts:
             if adults <= 0:
                 raise ValueError("adults_counts must contain only positive values")
+        if config.batch_pause_seconds < 0:
+            raise ValueError("batch_pause_seconds must be >= 0")
+        if config.retry_count < 0:
+            raise ValueError("retry_count must be >= 0")
+        if config.retry_pause_seconds < 0:
+            raise ValueError("retry_pause_seconds must be >= 0")
         self._config = config
         self._log_lock = Lock()
 
@@ -78,7 +87,8 @@ class SeleniumRatesParallelRunner:
         days_total = len(stay_dates)
 
         for day_index, stay_date in enumerate(stay_dates, start=1):
-            for adults_batch in self._adults_batches():
+            adults_batches = self._adults_batches()
+            for batch_index, adults_batch in enumerate(adults_batches, start=1):
                 batch_label = self._format_batch_label(adults_batch)
                 date_label = stay_date.strftime("%d.%m.%y")
                 self._log(f"[БАТЧ {batch_label}] старт — {day_index}/{days_total} — {date_label}")
@@ -93,6 +103,8 @@ class SeleniumRatesParallelRunner:
                 for outcome in batch_outcomes:
                     out.extend(outcome.rates)
                 self._log(f"[БАТЧ {batch_label}] завершён — {day_index}/{days_total} — {date_label}")
+                if batch_index < len(adults_batches) and self._config.batch_pause_seconds > 0:
+                    sleep(self._config.batch_pause_seconds)
 
         total_elapsed = self._format_duration(perf_counter() - run_started_at)
         self._log(f"Парсинг категорий закончен, общее время {total_elapsed}")
@@ -132,7 +144,7 @@ class SeleniumRatesParallelRunner:
         with ThreadPoolExecutor(max_workers=len(adults_counts)) as pool:
             future_to_adults = {
                 pool.submit(
-                    self._run_single_parser,
+                    self._run_single_parser_with_retry,
                     webdriver=webdriver,
                     category_to_group=category_to_group,
                     adults_count=adults_count,
@@ -164,6 +176,51 @@ class SeleniumRatesParallelRunner:
                     )
                 outcomes.append(outcome)
         return outcomes
+
+    def _run_single_parser_with_retry(
+        self,
+        *,
+        webdriver,
+        category_to_group: dict[str, str],
+        adults_count: int,
+        stay_dates: list[date],
+        day_numbering: tuple[int, int] | None = None,
+    ) -> ParserRunOutcome:
+        total_attempts = self._config.retry_count + 1
+        final_outcome: ParserRunOutcome | None = None
+        log_day_index, log_days_total = day_numbering or (1, len(stay_dates))
+
+        for attempt in range(1, total_attempts + 1):
+            outcome = self._run_single_parser(
+                webdriver=webdriver,
+                category_to_group=category_to_group,
+                adults_count=adults_count,
+                stay_dates=stay_dates,
+                day_numbering=day_numbering,
+            )
+            if outcome.failed_fn is None:
+                return outcome
+            final_outcome = outcome
+            if attempt >= total_attempts:
+                break
+            self._log(
+                f"[RETRY] парсер ({self._adults_label(adults_count)}), "
+                f"({log_day_index} день из {log_days_total}), попытка {attempt + 1}/{total_attempts}"
+            )
+            if self._config.retry_pause_seconds > 0:
+                sleep(self._config.retry_pause_seconds)
+
+        if final_outcome is None:
+            raise RuntimeError("retry wrapper finished without outcome")
+        return ParserRunOutcome(
+            adults_count=final_outcome.adults_count,
+            rates=tuple(),
+            stay_date=final_outcome.stay_date,
+            total_found=final_outcome.total_found,
+            total_collected=final_outcome.total_collected,
+            failed_fn=final_outcome.failed_fn,
+            elapsed_seconds=final_outcome.elapsed_seconds,
+        )
 
     def _run_single_parser(
         self,
@@ -303,7 +360,7 @@ class SeleniumRatesParallelRunner:
 
     def _adults_batches(self) -> list[tuple[int, ...]]:
         adults = tuple(self._config.adults_counts)
-        return [adults[idx:idx + 3] for idx in range(0, len(adults), 3)]
+        return [adults[idx:idx + 2] for idx in range(0, len(adults), 2)]
 
     @staticmethod
     def _format_batch_label(adults_counts: tuple[int, ...]) -> str:

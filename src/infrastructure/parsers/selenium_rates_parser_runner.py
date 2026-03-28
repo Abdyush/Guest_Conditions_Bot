@@ -13,6 +13,9 @@ class SeleniumRatesParserRunner:
     rules_repo: PostgresRulesRepository
     headless: bool = True
     wait_seconds: int = 20
+    batch_pause_seconds: float = 3.0
+    retry_count: int = 1
+    retry_pause_seconds: float = 1.0
 
     def run(self, *, start_date: date, days_to_collect: int, adults_counts: tuple[int, ...]) -> int:
         config = RatesParallelRunConfig(
@@ -21,6 +24,9 @@ class SeleniumRatesParserRunner:
             days_to_collect=days_to_collect,
             headless=self.headless,
             wait_seconds=self.wait_seconds,
+            batch_pause_seconds=self.batch_pause_seconds,
+            retry_count=self.retry_count,
+            retry_pause_seconds=self.retry_pause_seconds,
         )
         runner = SeleniumRatesParallelRunner(config)
         rates = runner.run(start_date=start_date)
