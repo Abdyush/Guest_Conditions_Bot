@@ -26,10 +26,23 @@ class RatesParallelRunConfig:
 class ParserRunOutcome:
     adults_count: int
     rates: tuple[DailyRate, ...]
+    stay_date: date | None = None
     total_found: int = 0
     total_collected: int = 0
     failed_fn: str | None = None
     elapsed_seconds: float = 0.0
+
+
+@dataclass(frozen=True, slots=True)
+class AggregatedStats:
+    adults_count: int
+    total_days: int
+    success_days: int
+    failed_days: int
+    total_found: int
+    total_collected: int
+    total_elapsed_seconds: float
+    errors: tuple[tuple[date | None, str], ...]
 
 
 def build_stay_dates(start_date: date, days_to_collect: int) -> list[date]:
@@ -62,17 +75,71 @@ class SeleniumRatesParallelRunner:
         stay_dates = build_stay_dates(start_date, self._config.days_to_collect)
         out: list[DailyRate] = []
         outcomes: list[ParserRunOutcome] = []
-        max_workers = len(self._config.adults_counts)
-        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        days_total = len(stay_dates)
+
+        for day_index, stay_date in enumerate(stay_dates, start=1):
+            for adults_batch in self._adults_batches():
+                batch_label = self._format_batch_label(adults_batch)
+                date_label = stay_date.strftime("%d.%m.%y")
+                self._log(f"[БАТЧ {batch_label}] старт — {day_index}/{days_total} — {date_label}")
+                batch_outcomes = self._run_batch(
+                    webdriver=webdriver,
+                    category_to_group=self._config.category_to_group,
+                    adults_counts=adults_batch,
+                    stay_dates=[stay_date],
+                    day_numbering=(day_index, days_total),
+                )
+                outcomes.extend(batch_outcomes)
+                for outcome in batch_outcomes:
+                    out.extend(outcome.rates)
+                self._log(f"[БАТЧ {batch_label}] завершён — {day_index}/{days_total} — {date_label}")
+
+        total_elapsed = self._format_duration(perf_counter() - run_started_at)
+        self._log(f"Парсинг категорий закончен, общее время {total_elapsed}")
+        aggregated_stats = self._aggregate_outcomes_by_adults(outcomes)
+        success_count = sum(1 for x in aggregated_stats if x.failed_days == 0)
+        self._log(
+            f"из {len(self._config.adults_counts)} парсеров "
+            f"{success_count} успешно выполнили работу"
+        )
+        self._log("")
+        for stats in aggregated_stats:
+            self._log(f"парсер ({self._adults_label(stats.adults_count)}):")
+            self._log(f"- успешно: {stats.success_days}/{stats.total_days} дней")
+            if stats.failed_days:
+                self._log(f"- ошибок: {stats.failed_days}")
+            self._log(f"- найдено: {stats.total_found}")
+            self._log(f"- собрано: {stats.total_collected}")
+            self._log(f"- время: {self._format_duration(stats.total_elapsed_seconds)}")
+            if stats.errors:
+                self._log("- ошибки:")
+                for failed_date, fn_name in stats.errors:
+                    date_label = failed_date.strftime("%d.%m.%y") if failed_date is not None else "?"
+                    self._log(f"  • {date_label} → {fn_name}")
+
+        return out
+
+    def _run_batch(
+        self,
+        *,
+        webdriver,
+        category_to_group: dict[str, str],
+        adults_counts: tuple[int, ...],
+        stay_dates: list[date],
+        day_numbering: tuple[int, int] | None = None,
+    ) -> list[ParserRunOutcome]:
+        outcomes: list[ParserRunOutcome] = []
+        with ThreadPoolExecutor(max_workers=len(adults_counts)) as pool:
             future_to_adults = {
                 pool.submit(
                     self._run_single_parser,
                     webdriver=webdriver,
-                    category_to_group=self._config.category_to_group,
+                    category_to_group=category_to_group,
                     adults_count=adults_count,
                     stay_dates=stay_dates,
+                    day_numbering=day_numbering,
                 ): adults_count
-                for adults_count in self._config.adults_counts
+                for adults_count in adults_counts
             }
             for future in as_completed(future_to_adults):
                 adults_count = future_to_adults[future]
@@ -83,41 +150,20 @@ class SeleniumRatesParallelRunner:
                     outcome = ParserRunOutcome(
                         adults_count=adults_count,
                         rates=tuple(),
+                        stay_date=stay_dates[0] if len(stay_dates) == 1 else None,
                         total_found=0,
                         total_collected=0,
                         failed_fn=fn_name,
                         elapsed_seconds=0.0,
                     )
                     msg = self._short_error_text(exc)
+                    log_day_index, log_days_total = day_numbering or (1, len(stay_dates))
                     self._log(
                         f"ОШИБКА, парсер ({self._adults_label(adults_count)}), "
-                        f"(1 день из {len(stay_dates)}) {fn_name}, {msg}"
+                        f"({log_day_index} день из {log_days_total}) {fn_name}, {msg}"
                     )
                 outcomes.append(outcome)
-                out.extend(outcome.rates)
-
-        total_elapsed = self._format_duration(perf_counter() - run_started_at)
-        self._log(f"Парсинг категорий закончен, общее время {total_elapsed}")
-        success_count = sum(1 for x in outcomes if x.failed_fn is None)
-        self._log(
-            f"из {len(self._config.adults_counts)} парсеров "
-            f"{success_count} успешно выполнили работу"
-        )
-        self._log("")
-        for outcome in sorted(outcomes, key=lambda x: x.adults_count):
-            if outcome.failed_fn is not None:
-                self._log(
-                    f"парсер ({self._adults_label(outcome.adults_count)}) "
-                    f"сломался: {outcome.failed_fn}"
-                )
-                continue
-            self._log(
-                f"парсер ({self._adults_label(outcome.adults_count)}) успешно: "
-                f"из {outcome.total_found} найденных, собрал {outcome.total_collected}, "
-                f"время {self._format_duration(outcome.elapsed_seconds)}"
-            )
-
-        return out
+        return outcomes
 
     def _run_single_parser(
         self,
@@ -126,9 +172,14 @@ class SeleniumRatesParallelRunner:
         category_to_group: dict[str, str],
         adults_count: int,
         stay_dates: list[date],
+        day_numbering: tuple[int, int] | None = None,
     ) -> ParserRunOutcome:
         adults_label = self._adults_label(adults_count)
         days_total = len(stay_dates)
+        start_day_index = 1
+        log_days_total = days_total
+        if day_numbering is not None:
+            start_day_index, log_days_total = day_numbering
         parser_started_at = perf_counter()
 
         self._log(f"парсер ({adults_label}) начал работу")
@@ -147,23 +198,28 @@ class SeleniumRatesParallelRunner:
                 except Exception as exc:
                     fn_name = self._extract_fn_name(exc.__traceback__)
                     msg = self._short_error_text(exc)
-                    self._log(f"ОШИБКА, парсер ({adults_label}), (1 день из {days_total}) {fn_name}, {msg}")
+                    self._log(
+                        f"ОШИБКА, парсер ({adults_label}), "
+                        f"({start_day_index} день из {log_days_total}) {fn_name}, {msg}"
+                    )
                     failed_fn = fn_name
                     return ParserRunOutcome(
                         adults_count=adults_count,
                         rates=tuple(parsed),
+                        stay_date=stay_dates[0] if len(stay_dates) == 1 else None,
                         total_found=totals["found"],
                         total_collected=totals["collected"],
                         failed_fn=failed_fn,
                         elapsed_seconds=perf_counter() - parser_started_at,
                     )
-                for day_index, stay_date in enumerate(stay_dates, start=1):
+                for local_day_index, stay_date in enumerate(stay_dates, start=1):
+                    log_day_index = start_day_index + local_day_index - 1
                     try:
                         self._install_day_logging_hooks(
                             gateway=gateway,
                             adults_label=adults_label,
-                            day_index=day_index,
-                            days_total=days_total,
+                            day_index=log_day_index,
+                            days_total=log_days_total,
                             stay_date=stay_date,
                             totals=totals,
                         )
@@ -181,7 +237,7 @@ class SeleniumRatesParallelRunner:
                             failed_fn = fn_name
                         msg = self._short_error_text(exc)
                         self._log(
-                            f"ОШИБКА, парсер ({adults_label}), ({day_index} день из {days_total}) "
+                            f"ОШИБКА, парсер ({adults_label}), ({log_day_index} день из {log_days_total}) "
                             f"{fn_name}, {msg}"
                         )
         finally:
@@ -190,6 +246,7 @@ class SeleniumRatesParallelRunner:
         return ParserRunOutcome(
             adults_count=adults_count,
             rates=tuple(parsed),
+            stay_date=stay_dates[0] if len(stay_dates) == 1 else None,
             total_found=totals["found"],
             total_collected=totals["collected"],
             failed_fn=failed_fn,
@@ -243,6 +300,54 @@ class SeleniumRatesParallelRunner:
     def _log(self, message: str) -> None:
         with self._log_lock:
             print(message)
+
+    def _adults_batches(self) -> list[tuple[int, ...]]:
+        adults = tuple(self._config.adults_counts)
+        return [adults[idx:idx + 3] for idx in range(0, len(adults), 3)]
+
+    @staticmethod
+    def _format_batch_label(adults_counts: tuple[int, ...]) -> str:
+        return ",".join(str(value) for value in adults_counts)
+
+    def _aggregate_outcomes_by_adults(self, outcomes: list[ParserRunOutcome]) -> list[AggregatedStats]:
+        by_adults: dict[int, dict[str, object]] = {}
+        for outcome in outcomes:
+            current = by_adults.setdefault(
+                outcome.adults_count,
+                {
+                    "total_days": 0,
+                    "success_days": 0,
+                    "failed_days": 0,
+                    "total_found": 0,
+                    "total_collected": 0,
+                    "total_elapsed_seconds": 0.0,
+                    "errors": [],
+                },
+            )
+            current["total_days"] = int(current["total_days"]) + 1
+            current["total_found"] = int(current["total_found"]) + outcome.total_found
+            current["total_collected"] = int(current["total_collected"]) + outcome.total_collected
+            current["total_elapsed_seconds"] = float(current["total_elapsed_seconds"]) + outcome.elapsed_seconds
+            if outcome.failed_fn is None:
+                current["success_days"] = int(current["success_days"]) + 1
+            else:
+                current["failed_days"] = int(current["failed_days"]) + 1
+                errors = list(current["errors"])
+                errors.append((outcome.stay_date, outcome.failed_fn))
+                current["errors"] = errors
+        return [
+            AggregatedStats(
+                adults_count=adults_count,
+                total_days=int(stats["total_days"]),
+                success_days=int(stats["success_days"]),
+                failed_days=int(stats["failed_days"]),
+                total_found=int(stats["total_found"]),
+                total_collected=int(stats["total_collected"]),
+                total_elapsed_seconds=float(stats["total_elapsed_seconds"]),
+                errors=tuple(stats["errors"]),
+            )
+            for adults_count, stats in sorted(by_adults.items())
+        ]
 
     @staticmethod
     def _adults_label(adults_count: int) -> str:
