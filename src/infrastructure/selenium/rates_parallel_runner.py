@@ -18,6 +18,8 @@ class RatesParallelRunConfig:
     category_to_group: dict[str, str]
     adults_counts: tuple[int, ...]
     days_to_collect: int = 3
+    date_chunk_size: int = 10
+    adults_batch_layout: tuple[tuple[int, ...], ...] = ((1, 2, 3), (4, 5, 6))
     headless: bool = True
     wait_seconds: int = 20
     batch_pause_seconds: float = 3.0
@@ -30,6 +32,7 @@ class ParserRunOutcome:
     adults_count: int
     rates: tuple[DailyRate, ...]
     stay_date: date | None = None
+    days_count: int = 1
     total_found: int = 0
     total_collected: int = 0
     failed_fn: str | None = None
@@ -54,6 +57,12 @@ def build_stay_dates(start_date: date, days_to_collect: int) -> list[date]:
     return [start_date + timedelta(days=offset) for offset in range(days_to_collect)]
 
 
+def split_stay_dates_into_chunks(stay_dates: list[date], chunk_size: int) -> list[list[date]]:
+    if chunk_size <= 0:
+        raise ValueError("chunk_size must be > 0")
+    return [stay_dates[idx:idx + chunk_size] for idx in range(0, len(stay_dates), chunk_size)]
+
+
 class SeleniumRatesParallelRunner:
     def __init__(self, config: RatesParallelRunConfig):
         if not config.category_to_group:
@@ -63,12 +72,19 @@ class SeleniumRatesParallelRunner:
         for adults in config.adults_counts:
             if adults <= 0:
                 raise ValueError("adults_counts must contain only positive values")
+        if config.date_chunk_size <= 0:
+            raise ValueError("date_chunk_size must be > 0")
         if config.batch_pause_seconds < 0:
             raise ValueError("batch_pause_seconds must be >= 0")
         if config.retry_count < 0:
             raise ValueError("retry_count must be >= 0")
         if config.retry_pause_seconds < 0:
             raise ValueError("retry_pause_seconds must be >= 0")
+        if config.adults_batch_layout:
+            configured_adults = {value for batch in config.adults_batch_layout for value in batch}
+            unexpected = configured_adults.difference(config.adults_counts)
+            if unexpected:
+                raise ValueError("adults_batch_layout contains values not present in adults_counts")
         self._config = config
         self._log_lock = Lock()
 
@@ -82,29 +98,43 @@ class SeleniumRatesParallelRunner:
             ) from exc
 
         stay_dates = build_stay_dates(start_date, self._config.days_to_collect)
+        date_chunks = split_stay_dates_into_chunks(stay_dates, self._config.date_chunk_size)
         out: list[DailyRate] = []
         outcomes: list[ParserRunOutcome] = []
         days_total = len(stay_dates)
+        chunks_total = len(date_chunks)
 
-        for day_index, stay_date in enumerate(stay_dates, start=1):
+        for chunk_index, stay_dates_chunk in enumerate(date_chunks, start=1):
+            chunk_start_day_index = ((chunk_index - 1) * self._config.date_chunk_size) + 1
+            chunk_end_day_index = chunk_start_day_index + len(stay_dates_chunk) - 1
+            self._log(
+                f"[ЧАНК {chunk_index}/{chunks_total}] старт — дни {chunk_start_day_index}-{chunk_end_day_index} из {days_total}"
+            )
             adults_batches = self._adults_batches()
             for batch_index, adults_batch in enumerate(adults_batches, start=1):
                 batch_label = self._format_batch_label(adults_batch)
-                date_label = stay_date.strftime("%d.%m.%y")
-                self._log(f"[БАТЧ {batch_label}] старт — {day_index}/{days_total} — {date_label}")
+                self._log(
+                    f"[БАТЧ {batch_label}] старт — [ЧАНК {chunk_index}/{chunks_total}] "
+                    f"дни {chunk_start_day_index}-{chunk_end_day_index} из {days_total}"
+                )
                 batch_outcomes = self._run_batch(
                     webdriver=webdriver,
                     category_to_group=self._config.category_to_group,
                     adults_counts=adults_batch,
-                    stay_dates=[stay_date],
-                    day_numbering=(day_index, days_total),
+                    stay_dates=stay_dates_chunk,
+                    day_numbering=(chunk_start_day_index, days_total),
+                    chunk_numbering=(chunk_index, chunks_total),
                 )
                 outcomes.extend(batch_outcomes)
                 for outcome in batch_outcomes:
                     out.extend(outcome.rates)
-                self._log(f"[БАТЧ {batch_label}] завершён — {day_index}/{days_total} — {date_label}")
+                self._log(
+                    f"[БАТЧ {batch_label}] завершён — [ЧАНК {chunk_index}/{chunks_total}] "
+                    f"дни {chunk_start_day_index}-{chunk_end_day_index} из {days_total}"
+                )
                 if batch_index < len(adults_batches) and self._config.batch_pause_seconds > 0:
                     sleep(self._config.batch_pause_seconds)
+            self._log(f"[ЧАНК {chunk_index}/{chunks_total}] завершён")
 
         total_elapsed = self._format_duration(perf_counter() - run_started_at)
         self._log(f"Парсинг категорий закончен, общее время {total_elapsed}")
@@ -127,7 +157,7 @@ class SeleniumRatesParallelRunner:
                 self._log("- ошибки:")
                 for failed_date, fn_name in stats.errors:
                     date_label = failed_date.strftime("%d.%m.%y") if failed_date is not None else "?"
-                    self._log(f"  • {date_label} → {fn_name}")
+                    self._log(f"  • {date_label} -> {fn_name}")
 
         return out
 
@@ -139,6 +169,7 @@ class SeleniumRatesParallelRunner:
         adults_counts: tuple[int, ...],
         stay_dates: list[date],
         day_numbering: tuple[int, int] | None = None,
+        chunk_numbering: tuple[int, int] | None = None,
     ) -> list[ParserRunOutcome]:
         outcomes: list[ParserRunOutcome] = []
         with ThreadPoolExecutor(max_workers=len(adults_counts)) as pool:
@@ -150,6 +181,7 @@ class SeleniumRatesParallelRunner:
                     adults_count=adults_count,
                     stay_dates=stay_dates,
                     day_numbering=day_numbering,
+                    chunk_numbering=chunk_numbering,
                 ): adults_count
                 for adults_count in adults_counts
             }
@@ -162,7 +194,8 @@ class SeleniumRatesParallelRunner:
                     outcome = ParserRunOutcome(
                         adults_count=adults_count,
                         rates=tuple(),
-                        stay_date=stay_dates[0] if len(stay_dates) == 1 else None,
+                        stay_date=stay_dates[0] if stay_dates else None,
+                        days_count=len(stay_dates),
                         total_found=0,
                         total_collected=0,
                         failed_fn=fn_name,
@@ -170,9 +203,10 @@ class SeleniumRatesParallelRunner:
                     )
                     msg = self._short_error_text(exc)
                     log_day_index, log_days_total = day_numbering or (1, len(stay_dates))
+                    chunk_text = self._format_chunk_log_suffix(chunk_numbering)
                     self._log(
                         f"ОШИБКА, парсер ({self._adults_label(adults_count)}), "
-                        f"({log_day_index} день из {log_days_total}) {fn_name}, {msg}"
+                        f"({log_day_index} день из {log_days_total}){chunk_text} {fn_name}, {msg}"
                     )
                 outcomes.append(outcome)
         return outcomes
@@ -185,6 +219,7 @@ class SeleniumRatesParallelRunner:
         adults_count: int,
         stay_dates: list[date],
         day_numbering: tuple[int, int] | None = None,
+        chunk_numbering: tuple[int, int] | None = None,
     ) -> ParserRunOutcome:
         total_attempts = self._config.retry_count + 1
         final_outcome: ParserRunOutcome | None = None
@@ -197,15 +232,18 @@ class SeleniumRatesParallelRunner:
                 adults_count=adults_count,
                 stay_dates=stay_dates,
                 day_numbering=day_numbering,
+                chunk_numbering=chunk_numbering,
             )
             if outcome.failed_fn is None:
                 return outcome
             final_outcome = outcome
             if attempt >= total_attempts:
                 break
+            chunk_text = self._format_chunk_retry(chunk_numbering)
             self._log(
                 f"[RETRY] парсер ({self._adults_label(adults_count)}), "
-                f"({log_day_index} день из {log_days_total}), попытка {attempt + 1}/{total_attempts}"
+                f"{chunk_text} ({log_day_index} день из {log_days_total}), "
+                f"попытка {attempt + 1}/{total_attempts}"
             )
             if self._config.retry_pause_seconds > 0:
                 sleep(self._config.retry_pause_seconds)
@@ -216,6 +254,7 @@ class SeleniumRatesParallelRunner:
             adults_count=final_outcome.adults_count,
             rates=tuple(),
             stay_date=final_outcome.stay_date,
+            days_count=final_outcome.days_count,
             total_found=final_outcome.total_found,
             total_collected=final_outcome.total_collected,
             failed_fn=final_outcome.failed_fn,
@@ -230,6 +269,7 @@ class SeleniumRatesParallelRunner:
         adults_count: int,
         stay_dates: list[date],
         day_numbering: tuple[int, int] | None = None,
+        chunk_numbering: tuple[int, int] | None = None,
     ) -> ParserRunOutcome:
         adults_label = self._adults_label(adults_count)
         days_total = len(stay_dates)
@@ -255,15 +295,17 @@ class SeleniumRatesParallelRunner:
                 except Exception as exc:
                     fn_name = self._extract_fn_name(exc.__traceback__)
                     msg = self._short_error_text(exc)
+                    chunk_text = self._format_chunk_log_suffix(chunk_numbering)
                     self._log(
                         f"ОШИБКА, парсер ({adults_label}), "
-                        f"({start_day_index} день из {log_days_total}) {fn_name}, {msg}"
+                        f"({start_day_index} день из {log_days_total}){chunk_text} {fn_name}, {msg}"
                     )
                     failed_fn = fn_name
                     return ParserRunOutcome(
                         adults_count=adults_count,
                         rates=tuple(parsed),
-                        stay_date=stay_dates[0] if len(stay_dates) == 1 else None,
+                        stay_date=stay_dates[0] if stay_dates else None,
+                        days_count=len(stay_dates),
                         total_found=totals["found"],
                         total_collected=totals["collected"],
                         failed_fn=failed_fn,
@@ -293,8 +335,9 @@ class SeleniumRatesParallelRunner:
                         if failed_fn is None:
                             failed_fn = fn_name
                         msg = self._short_error_text(exc)
+                        chunk_text = self._format_chunk_log_suffix(chunk_numbering)
                         self._log(
-                            f"ОШИБКА, парсер ({adults_label}), ({log_day_index} день из {log_days_total}) "
+                            f"ОШИБКА, парсер ({adults_label}), ({log_day_index} день из {log_days_total}){chunk_text} "
                             f"{fn_name}, {msg}"
                         )
         finally:
@@ -303,7 +346,8 @@ class SeleniumRatesParallelRunner:
         return ParserRunOutcome(
             adults_count=adults_count,
             rates=tuple(parsed),
-            stay_date=stay_dates[0] if len(stay_dates) == 1 else None,
+            stay_date=stay_dates[0] if stay_dates else None,
+            days_count=len(stay_dates),
             total_found=totals["found"],
             total_collected=totals["collected"],
             failed_fn=failed_fn,
@@ -359,12 +403,35 @@ class SeleniumRatesParallelRunner:
             print(message)
 
     def _adults_batches(self) -> list[tuple[int, ...]]:
+        if self._config.adults_batch_layout:
+            allowed = set(self._config.adults_counts)
+            batches = []
+            for batch in self._config.adults_batch_layout:
+                filtered = tuple(value for value in batch if value in allowed)
+                if filtered:
+                    batches.append(filtered)
+            if batches:
+                return batches
         adults = tuple(self._config.adults_counts)
-        return [adults[idx:idx + 2] for idx in range(0, len(adults), 2)]
+        return [adults[idx:idx + 3] for idx in range(0, len(adults), 3)]
 
     @staticmethod
     def _format_batch_label(adults_counts: tuple[int, ...]) -> str:
         return ",".join(str(value) for value in adults_counts)
+
+    @staticmethod
+    def _format_chunk_log_suffix(chunk_numbering: tuple[int, int] | None) -> str:
+        if chunk_numbering is None:
+            return ""
+        chunk_index, chunks_total = chunk_numbering
+        return f", чанк {chunk_index}/{chunks_total}"
+
+    @staticmethod
+    def _format_chunk_retry(chunk_numbering: tuple[int, int] | None) -> str:
+        if chunk_numbering is None:
+            return ""
+        chunk_index, chunks_total = chunk_numbering
+        return f"чанк {chunk_index}/{chunks_total},"
 
     def _aggregate_outcomes_by_adults(self, outcomes: list[ParserRunOutcome]) -> list[AggregatedStats]:
         by_adults: dict[int, dict[str, object]] = {}
@@ -381,14 +448,14 @@ class SeleniumRatesParallelRunner:
                     "errors": [],
                 },
             )
-            current["total_days"] = int(current["total_days"]) + 1
+            current["total_days"] = int(current["total_days"]) + outcome.days_count
             current["total_found"] = int(current["total_found"]) + outcome.total_found
             current["total_collected"] = int(current["total_collected"]) + outcome.total_collected
             current["total_elapsed_seconds"] = float(current["total_elapsed_seconds"]) + outcome.elapsed_seconds
             if outcome.failed_fn is None:
-                current["success_days"] = int(current["success_days"]) + 1
+                current["success_days"] = int(current["success_days"]) + outcome.days_count
             else:
-                current["failed_days"] = int(current["failed_days"]) + 1
+                current["failed_days"] = int(current["failed_days"]) + outcome.days_count
                 errors = list(current["errors"])
                 errors.append((outcome.stay_date, outcome.failed_fn))
                 current["errors"] = errors
