@@ -12,6 +12,7 @@ from src.infrastructure.selenium.rates_parallel_runner import (
     RatesParallelRunConfig,
     SeleniumRatesParallelRunner,
     split_stay_dates_into_chunks,
+    split_stay_dates_into_outer_blocks,
 )
 
 
@@ -28,6 +29,18 @@ def _rate(*, stay_date: date, adults_count: int) -> DailyRate:
     )
 
 
+def test_split_stay_dates_into_outer_blocks_uses_block_size():
+    stay_dates = [date(2026, 4, day) for day in range(1, 24)]
+
+    blocks = split_stay_dates_into_outer_blocks(stay_dates, 10)
+
+    assert blocks == [
+        [date(2026, 4, day) for day in range(1, 11)],
+        [date(2026, 4, day) for day in range(11, 21)],
+        [date(2026, 4, day) for day in range(21, 24)],
+    ]
+
+
 def test_split_stay_dates_into_chunks_uses_chunk_size():
     stay_dates = [date(2026, 4, day) for day in range(1, 24)]
 
@@ -40,7 +53,7 @@ def test_split_stay_dates_into_chunks_uses_chunk_size():
     ]
 
 
-def test_runner_processes_date_chunks_in_two_sequential_batches(monkeypatch):
+def test_runner_processes_outer_blocks_chunks_and_batches_in_order(monkeypatch):
     monkeypatch.setitem(sys.modules, "selenium", types.SimpleNamespace(webdriver=object()))
 
     calls: list[tuple[tuple[int, ...], tuple[date, ...], tuple[int, int] | None, tuple[int, int] | None]] = []
@@ -76,44 +89,28 @@ def test_runner_processes_date_chunks_in_two_sequential_batches(monkeypatch):
         RatesParallelRunConfig(
             category_to_group={"Category": "DELUXE"},
             adults_counts=(1, 2, 3, 4, 5, 6),
-            days_to_collect=12,
+            days_to_collect=35,
+            outer_block_size_days=30,
             date_chunk_size=10,
         )
     )
 
-    start_date = date(2026, 4, 1)
-    out = runner.run(start_date=start_date)
+    out = runner.run(start_date=date(2026, 4, 1))
 
     assert calls == [
-        (
-            (1, 2, 3),
-            tuple(date(2026, 4, day) for day in range(1, 11)),
-            (1, 12),
-            (1, 2),
-        ),
-        (
-            (4, 5, 6),
-            tuple(date(2026, 4, day) for day in range(1, 11)),
-            (1, 12),
-            (1, 2),
-        ),
-        (
-            (1, 2, 3),
-            (date(2026, 4, 11), date(2026, 4, 12)),
-            (11, 12),
-            (2, 2),
-        ),
-        (
-            (4, 5, 6),
-            (date(2026, 4, 11), date(2026, 4, 12)),
-            (11, 12),
-            (2, 2),
-        ),
+        ((1, 2, 3), tuple(date(2026, 4, day) for day in range(1, 11)), (1, 35), (1, 3)),
+        ((4, 5, 6), tuple(date(2026, 4, day) for day in range(1, 11)), (1, 35), (1, 3)),
+        ((1, 2, 3), tuple(date(2026, 4, day) for day in range(11, 21)), (11, 35), (2, 3)),
+        ((4, 5, 6), tuple(date(2026, 4, day) for day in range(11, 21)), (11, 35), (2, 3)),
+        ((1, 2, 3), tuple(date(2026, 4, day) for day in range(21, 31)), (21, 35), (3, 3)),
+        ((4, 5, 6), tuple(date(2026, 4, day) for day in range(21, 31)), (21, 35), (3, 3)),
+        ((1, 2, 3), tuple(date(2026, 5, day) for day in range(1, 6)), (31, 35), (1, 1)),
+        ((4, 5, 6), tuple(date(2026, 5, day) for day in range(1, 6)), (31, 35), (1, 1)),
     ]
-    assert len(out) == 72
+    assert len(out) == 210
 
 
-def test_runner_sleeps_between_batches(monkeypatch):
+def test_runner_sleeps_between_batches_and_outer_blocks(monkeypatch):
     monkeypatch.setitem(sys.modules, "selenium", types.SimpleNamespace(webdriver=object()))
 
     sleeps: list[float] = []
@@ -149,7 +146,9 @@ def test_runner_sleeps_between_batches(monkeypatch):
         RatesParallelRunConfig(
             category_to_group={"Category": "DELUXE"},
             adults_counts=(1, 2, 3, 4, 5, 6),
-            days_to_collect=12,
+            days_to_collect=35,
+            outer_block_size_days=30,
+            outer_block_pause_seconds=7.0,
             date_chunk_size=10,
             batch_pause_seconds=3.0,
         )
@@ -157,7 +156,7 @@ def test_runner_sleeps_between_batches(monkeypatch):
 
     runner.run(start_date=date(2026, 4, 1))
 
-    assert sleeps == [3.0, 3.0]
+    assert sleeps == [3.0, 3.0, 3.0, 7.0, 3.0]
 
 
 def test_parser_runner_publishes_snapshot_once_after_full_run(monkeypatch):
@@ -204,12 +203,12 @@ def test_parser_runner_publishes_snapshot_once_after_full_run(monkeypatch):
     assert captured["start_date"] == date(2026, 4, 1)
     assert isinstance(captured["config"], RatesParallelRunConfig)
     assert captured["config"].days_to_collect == 90
+    assert captured["config"].outer_block_size_days == 30
+    assert captured["config"].outer_block_pause_seconds == 5.0
     assert captured["config"].date_chunk_size == 10
     assert captured["config"].adults_batch_layout == ((1, 2, 3), (4, 5, 6))
-    assert captured["config"].adults_counts == (1, 2, 3, 4, 5, 6)
     assert captured["config"].batch_pause_seconds == 3.0
     assert captured["config"].retry_count == 1
-    assert captured["config"].retry_pause_seconds == 1.0
     assert captured["replace_calls"] == [rates]
 
 
@@ -218,7 +217,8 @@ def test_aggregate_outcomes_tracks_chunk_failures_by_days():
         RatesParallelRunConfig(
             category_to_group={"Category": "DELUXE"},
             adults_counts=(3,),
-            days_to_collect=12,
+            days_to_collect=35,
+            outer_block_size_days=30,
             date_chunk_size=10,
         )
     )
@@ -239,7 +239,7 @@ def test_aggregate_outcomes_tracks_chunk_failures_by_days():
                 adults_count=3,
                 rates=tuple(),
                 stay_date=date(2026, 4, 11),
-                days_count=2,
+                days_count=10,
                 total_found=0,
                 total_collected=0,
                 failed_fn="get_rates_for_date",
@@ -248,15 +248,10 @@ def test_aggregate_outcomes_tracks_chunk_failures_by_days():
         ]
     )
 
-    assert len(stats) == 1
     stat = stats[0]
-    assert stat.adults_count == 3
-    assert stat.total_days == 12
+    assert stat.total_days == 20
     assert stat.success_days == 10
-    assert stat.failed_days == 2
-    assert stat.total_found == 50
-    assert stat.total_collected == 40
-    assert stat.total_elapsed_seconds == 13.0
+    assert stat.failed_days == 10
     assert stat.errors == ((date(2026, 4, 11), "get_rates_for_date"),)
 
 

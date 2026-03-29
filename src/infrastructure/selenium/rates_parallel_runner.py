@@ -18,6 +18,8 @@ class RatesParallelRunConfig:
     category_to_group: dict[str, str]
     adults_counts: tuple[int, ...]
     days_to_collect: int = 3
+    outer_block_size_days: int = 30
+    outer_block_pause_seconds: float = 5.0
     date_chunk_size: int = 10
     adults_batch_layout: tuple[tuple[int, ...], ...] = ((1, 2, 3), (4, 5, 6))
     headless: bool = True
@@ -57,6 +59,12 @@ def build_stay_dates(start_date: date, days_to_collect: int) -> list[date]:
     return [start_date + timedelta(days=offset) for offset in range(days_to_collect)]
 
 
+def split_stay_dates_into_outer_blocks(stay_dates: list[date], block_size: int) -> list[list[date]]:
+    if block_size <= 0:
+        raise ValueError("block_size must be > 0")
+    return [stay_dates[idx:idx + block_size] for idx in range(0, len(stay_dates), block_size)]
+
+
 def split_stay_dates_into_chunks(stay_dates: list[date], chunk_size: int) -> list[list[date]]:
     if chunk_size <= 0:
         raise ValueError("chunk_size must be > 0")
@@ -72,6 +80,10 @@ class SeleniumRatesParallelRunner:
         for adults in config.adults_counts:
             if adults <= 0:
                 raise ValueError("adults_counts must contain only positive values")
+        if config.outer_block_size_days <= 0:
+            raise ValueError("outer_block_size_days must be > 0")
+        if config.outer_block_pause_seconds < 0:
+            raise ValueError("outer_block_pause_seconds must be >= 0")
         if config.date_chunk_size <= 0:
             raise ValueError("date_chunk_size must be > 0")
         if config.batch_pause_seconds < 0:
@@ -98,43 +110,60 @@ class SeleniumRatesParallelRunner:
             ) from exc
 
         stay_dates = build_stay_dates(start_date, self._config.days_to_collect)
-        date_chunks = split_stay_dates_into_chunks(stay_dates, self._config.date_chunk_size)
+        outer_blocks = split_stay_dates_into_outer_blocks(stay_dates, self._config.outer_block_size_days)
         out: list[DailyRate] = []
         outcomes: list[ParserRunOutcome] = []
         days_total = len(stay_dates)
-        chunks_total = len(date_chunks)
+        blocks_total = len(outer_blocks)
 
-        for chunk_index, stay_dates_chunk in enumerate(date_chunks, start=1):
-            chunk_start_day_index = ((chunk_index - 1) * self._config.date_chunk_size) + 1
-            chunk_end_day_index = chunk_start_day_index + len(stay_dates_chunk) - 1
+        for block_index, outer_block_dates in enumerate(outer_blocks, start=1):
+            block_start_day_index = ((block_index - 1) * self._config.outer_block_size_days) + 1
+            block_end_day_index = block_start_day_index + len(outer_block_dates) - 1
             self._log(
-                f"[ЧАНК {chunk_index}/{chunks_total}] старт — дни {chunk_start_day_index}-{chunk_end_day_index} из {days_total}"
+                f"[БЛОК {block_index}/{blocks_total}] старт — дни {block_start_day_index}-{block_end_day_index} из {days_total}"
             )
-            adults_batches = self._adults_batches()
-            for batch_index, adults_batch in enumerate(adults_batches, start=1):
-                batch_label = self._format_batch_label(adults_batch)
+            date_chunks = split_stay_dates_into_chunks(outer_block_dates, self._config.date_chunk_size)
+            chunks_total = len(date_chunks)
+
+            for chunk_index, stay_dates_chunk in enumerate(date_chunks, start=1):
+                chunk_start_day_index = block_start_day_index + ((chunk_index - 1) * self._config.date_chunk_size)
+                chunk_end_day_index = chunk_start_day_index + len(stay_dates_chunk) - 1
                 self._log(
-                    f"[БАТЧ {batch_label}] старт — [ЧАНК {chunk_index}/{chunks_total}] "
+                    f"[ЧАНК {chunk_index}/{chunks_total}] старт — [БЛОК {block_index}/{blocks_total}] "
                     f"дни {chunk_start_day_index}-{chunk_end_day_index} из {days_total}"
                 )
-                batch_outcomes = self._run_batch(
-                    webdriver=webdriver,
-                    category_to_group=self._config.category_to_group,
-                    adults_counts=adults_batch,
-                    stay_dates=stay_dates_chunk,
-                    day_numbering=(chunk_start_day_index, days_total),
-                    chunk_numbering=(chunk_index, chunks_total),
-                )
-                outcomes.extend(batch_outcomes)
-                for outcome in batch_outcomes:
-                    out.extend(outcome.rates)
+                adults_batches = self._adults_batches()
+                for batch_index, adults_batch in enumerate(adults_batches, start=1):
+                    batch_label = self._format_batch_label(adults_batch)
+                    self._log(
+                        f"[БАТЧ {batch_label}] старт — [БЛОК {block_index}/{blocks_total}] [ЧАНК {chunk_index}/{chunks_total}] "
+                        f"дни {chunk_start_day_index}-{chunk_end_day_index} из {days_total}"
+                    )
+                    batch_outcomes = self._run_batch(
+                        webdriver=webdriver,
+                        category_to_group=self._config.category_to_group,
+                        adults_counts=adults_batch,
+                        stay_dates=stay_dates_chunk,
+                        day_numbering=(chunk_start_day_index, days_total),
+                        chunk_numbering=(chunk_index, chunks_total),
+                    )
+                    outcomes.extend(batch_outcomes)
+                    for outcome in batch_outcomes:
+                        out.extend(outcome.rates)
+                    self._log(
+                        f"[БАТЧ {batch_label}] завершён — [БЛОК {block_index}/{blocks_total}] [ЧАНК {chunk_index}/{chunks_total}] "
+                        f"дни {chunk_start_day_index}-{chunk_end_day_index} из {days_total}"
+                    )
+                    if batch_index < len(adults_batches) and self._config.batch_pause_seconds > 0:
+                        sleep(self._config.batch_pause_seconds)
                 self._log(
-                    f"[БАТЧ {batch_label}] завершён — [ЧАНК {chunk_index}/{chunks_total}] "
+                    f"[ЧАНК {chunk_index}/{chunks_total}] завершён — [БЛОК {block_index}/{blocks_total}] "
                     f"дни {chunk_start_day_index}-{chunk_end_day_index} из {days_total}"
                 )
-                if batch_index < len(adults_batches) and self._config.batch_pause_seconds > 0:
-                    sleep(self._config.batch_pause_seconds)
-            self._log(f"[ЧАНК {chunk_index}/{chunks_total}] завершён")
+
+            self._log(f"[БЛОК {block_index}/{blocks_total}] завершён")
+            if block_index < blocks_total and self._config.outer_block_pause_seconds > 0:
+                sleep(self._config.outer_block_pause_seconds)
 
         total_elapsed = self._format_duration(perf_counter() - run_started_at)
         self._log(f"Парсинг категорий закончен, общее время {total_elapsed}")
