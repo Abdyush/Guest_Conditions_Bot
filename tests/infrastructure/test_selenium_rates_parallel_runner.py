@@ -6,14 +6,11 @@ from datetime import date
 
 from src.domain.entities.rate import DailyRate
 from src.domain.value_objects.money import Money
-from src.infrastructure.parsers.selenium_rates_parser_runner import SeleniumRatesParserRunner
-from src.infrastructure.selenium.rates_parallel_runner import (
-    ParserRunOutcome,
-    RatesParallelRunConfig,
-    SeleniumRatesParallelRunner,
-    split_stay_dates_into_chunks,
-    split_stay_dates_into_outer_blocks,
+from src.infrastructure.parsers.selenium_rates_parser_runner import (
+    SeleniumRatesParserRunner,
+    build_rates_segments,
 )
+from src.infrastructure.selenium.rates_parallel_runner import RatesParallelRunConfig, SeleniumRatesParallelRunner
 
 
 def _rate(*, stay_date: date, adults_count: int) -> DailyRate:
@@ -29,144 +26,82 @@ def _rate(*, stay_date: date, adults_count: int) -> DailyRate:
     )
 
 
-def test_split_stay_dates_into_outer_blocks_uses_block_size():
-    stay_dates = [date(2026, 4, day) for day in range(1, 24)]
+def test_build_rates_segments_splits_90_days_into_three_segments_of_30():
+    segments = build_rates_segments(
+        start_date=date(2026, 4, 1),
+        days_to_collect=90,
+        segment_size_days=30,
+    )
 
-    blocks = split_stay_dates_into_outer_blocks(stay_dates, 10)
-
-    assert blocks == [
-        [date(2026, 4, day) for day in range(1, 11)],
-        [date(2026, 4, day) for day in range(11, 21)],
-        [date(2026, 4, day) for day in range(21, 24)],
+    assert [(segment.start_date, segment.days_to_collect) for segment in segments] == [
+        (date(2026, 4, 1), 30),
+        (date(2026, 5, 1), 30),
+        (date(2026, 5, 31), 30),
+    ]
+    assert [(segment.start_day_number, segment.end_day_number) for segment in segments] == [
+        (1, 30),
+        (31, 60),
+        (61, 90),
     ]
 
 
-def test_split_stay_dates_into_chunks_uses_chunk_size():
-    stay_dates = [date(2026, 4, day) for day in range(1, 24)]
+def test_build_rates_segments_keeps_last_partial_segment():
+    segments = build_rates_segments(
+        start_date=date(2026, 4, 1),
+        days_to_collect=65,
+        segment_size_days=30,
+    )
 
-    chunks = split_stay_dates_into_chunks(stay_dates, 10)
-
-    assert chunks == [
-        [date(2026, 4, day) for day in range(1, 11)],
-        [date(2026, 4, day) for day in range(11, 21)],
-        [date(2026, 4, day) for day in range(21, 24)],
+    assert [(segment.start_date, segment.days_to_collect) for segment in segments] == [
+        (date(2026, 4, 1), 30),
+        (date(2026, 5, 1), 30),
+        (date(2026, 5, 31), 5),
+    ]
+    assert [(segment.start_day_number, segment.end_day_number) for segment in segments] == [
+        (1, 30),
+        (31, 60),
+        (61, 65),
     ]
 
 
-def test_runner_processes_outer_blocks_chunks_and_batches_in_order(monkeypatch):
+def test_parallel_runner_uses_old_profile_single_executor_for_all_adults(monkeypatch):
     monkeypatch.setitem(sys.modules, "selenium", types.SimpleNamespace(webdriver=object()))
 
-    calls: list[tuple[tuple[int, ...], tuple[date, ...], tuple[int, int] | None, tuple[int, int] | None]] = []
+    calls: list[tuple[int, tuple[date, ...]]] = []
 
-    def fake_run_batch(
-        self,
-        *,
-        webdriver,
-        category_to_group,
-        adults_counts,
-        stay_dates,
-        day_numbering=None,
-        chunk_numbering=None,
-    ):
-        calls.append((adults_counts, tuple(stay_dates), day_numbering, chunk_numbering))
-        return [
-            ParserRunOutcome(
-                adults_count=adults_count,
-                rates=tuple(_rate(stay_date=stay_date, adults_count=adults_count) for stay_date in stay_dates),
-                stay_date=stay_dates[0],
-                days_count=len(stay_dates),
-                total_found=len(stay_dates),
-                total_collected=len(stay_dates),
-                failed_fn=None,
-                elapsed_seconds=1.0,
-            )
-            for adults_count in adults_counts
-        ]
+    def fake_run_single_parser(self, *, webdriver, category_to_group, adults_count, stay_dates):
+        calls.append((adults_count, tuple(stay_dates)))
+        return types.SimpleNamespace(
+            adults_count=adults_count,
+            rates=tuple(_rate(stay_date=stay_date, adults_count=adults_count) for stay_date in stay_dates),
+            total_found=len(stay_dates),
+            total_collected=len(stay_dates),
+            failed_fn=None,
+            elapsed_seconds=1.0,
+        )
 
-    monkeypatch.setattr(SeleniumRatesParallelRunner, "_run_batch", fake_run_batch)
+    monkeypatch.setattr(SeleniumRatesParallelRunner, "_run_single_parser", fake_run_single_parser)
 
     runner = SeleniumRatesParallelRunner(
         RatesParallelRunConfig(
             category_to_group={"Category": "DELUXE"},
             adults_counts=(1, 2, 3, 4, 5, 6),
-            days_to_collect=35,
-            outer_block_size_days=30,
-            date_chunk_size=10,
+            days_to_collect=30,
         )
     )
 
     out = runner.run(start_date=date(2026, 4, 1))
 
-    assert calls == [
-        ((1, 2, 3), tuple(date(2026, 4, day) for day in range(1, 11)), (1, 35), (1, 3)),
-        ((4, 5, 6), tuple(date(2026, 4, day) for day in range(1, 11)), (1, 35), (1, 3)),
-        ((1, 2, 3), tuple(date(2026, 4, day) for day in range(11, 21)), (11, 35), (2, 3)),
-        ((4, 5, 6), tuple(date(2026, 4, day) for day in range(11, 21)), (11, 35), (2, 3)),
-        ((1, 2, 3), tuple(date(2026, 4, day) for day in range(21, 31)), (21, 35), (3, 3)),
-        ((4, 5, 6), tuple(date(2026, 4, day) for day in range(21, 31)), (21, 35), (3, 3)),
-        ((1, 2, 3), tuple(date(2026, 5, day) for day in range(1, 6)), (31, 35), (1, 1)),
-        ((4, 5, 6), tuple(date(2026, 5, day) for day in range(1, 6)), (31, 35), (1, 1)),
-    ]
-    assert len(out) == 210
+    assert len(calls) == 6
+    assert {adults_count for adults_count, _ in calls} == {1, 2, 3, 4, 5, 6}
+    assert all(len(stay_dates) == 30 for _, stay_dates in calls)
+    assert len(out) == 180
 
 
-def test_runner_sleeps_between_batches_and_outer_blocks(monkeypatch):
-    monkeypatch.setitem(sys.modules, "selenium", types.SimpleNamespace(webdriver=object()))
-
-    sleeps: list[float] = []
-
-    def fake_run_batch(
-        self,
-        *,
-        webdriver,
-        category_to_group,
-        adults_counts,
-        stay_dates,
-        day_numbering=None,
-        chunk_numbering=None,
-    ):
-        return [
-            ParserRunOutcome(
-                adults_count=adults_count,
-                rates=tuple(_rate(stay_date=stay_date, adults_count=adults_count) for stay_date in stay_dates),
-                stay_date=stay_dates[0],
-                days_count=len(stay_dates),
-                total_found=len(stay_dates),
-                total_collected=len(stay_dates),
-                failed_fn=None,
-                elapsed_seconds=1.0,
-            )
-            for adults_count in adults_counts
-        ]
-
-    monkeypatch.setattr(SeleniumRatesParallelRunner, "_run_batch", fake_run_batch)
-    monkeypatch.setattr("src.infrastructure.selenium.rates_parallel_runner.sleep", sleeps.append)
-
-    runner = SeleniumRatesParallelRunner(
-        RatesParallelRunConfig(
-            category_to_group={"Category": "DELUXE"},
-            adults_counts=(1, 2, 3, 4, 5, 6),
-            days_to_collect=35,
-            outer_block_size_days=30,
-            outer_block_pause_seconds=7.0,
-            date_chunk_size=10,
-            batch_pause_seconds=3.0,
-        )
-    )
-
-    runner.run(start_date=date(2026, 4, 1))
-
-    assert sleeps == [3.0, 3.0, 3.0, 7.0, 3.0]
-
-
-def test_parser_runner_publishes_snapshot_once_after_full_run(monkeypatch):
+def test_parser_runner_runs_three_segments_and_publishes_once(monkeypatch):
     import src.infrastructure.parsers.selenium_rates_parser_runner as parser_module
 
-    captured: dict[str, object] = {}
-    rates = [
-        _rate(stay_date=date(2026, 4, 1), adults_count=1),
-        _rate(stay_date=date(2026, 4, 2), adults_count=4),
-    ]
+    captured: dict[str, object] = {"run_calls": [], "replace_calls": []}
 
     class FakeRulesRepo:
         def get_category_to_group(self):
@@ -174,23 +109,26 @@ def test_parser_runner_publishes_snapshot_once_after_full_run(monkeypatch):
 
     class FakeParallelRunner:
         def __init__(self, config):
-            captured["config"] = config
+            captured.setdefault("configs", []).append(config)
 
         def run(self, *, start_date):
-            captured["start_date"] = start_date
-            return rates
+            captured["run_calls"].append(start_date)
+            return [_rate(stay_date=start_date, adults_count=1)]
 
     class FakeDailyRatesRepo:
         def replace_all(self, rows):
-            captured.setdefault("replace_calls", []).append(rows)
+            captured["replace_calls"].append(rows)
 
     monkeypatch.setattr(parser_module, "SeleniumRatesParallelRunner", FakeParallelRunner)
     monkeypatch.setattr(parser_module, "PostgresDailyRatesRepository", FakeDailyRatesRepo)
+    monkeypatch.setattr(parser_module, "sleep", lambda *_args: None)
 
     runner = SeleniumRatesParserRunner(
         rules_repo=FakeRulesRepo(),
         headless=False,
         wait_seconds=11,
+        segment_size_days=30,
+        segment_pause_seconds=5.0,
     )
 
     count = runner.run(
@@ -199,126 +137,53 @@ def test_parser_runner_publishes_snapshot_once_after_full_run(monkeypatch):
         adults_counts=(1, 2, 3, 4, 5, 6),
     )
 
-    assert count == 2
-    assert captured["start_date"] == date(2026, 4, 1)
-    assert isinstance(captured["config"], RatesParallelRunConfig)
-    assert captured["config"].days_to_collect == 90
-    assert captured["config"].outer_block_size_days == 30
-    assert captured["config"].outer_block_pause_seconds == 5.0
-    assert captured["config"].date_chunk_size == 10
-    assert captured["config"].adults_batch_layout == ((1, 2, 3), (4, 5, 6))
-    assert captured["config"].batch_pause_seconds == 3.0
-    assert captured["config"].retry_count == 1
-    assert captured["replace_calls"] == [rates]
+    assert count == 3
+    assert captured["run_calls"] == [date(2026, 4, 1), date(2026, 5, 1), date(2026, 5, 31)]
+    assert [config.days_to_collect for config in captured["configs"]] == [30, 30, 30]
+    assert all(config.adults_counts == (1, 2, 3, 4, 5, 6) for config in captured["configs"])
+    assert all(config.headless is False for config in captured["configs"])
+    assert all(config.wait_seconds == 11 for config in captured["configs"])
+    assert len(captured["replace_calls"]) == 1
+    assert len(captured["replace_calls"][0]) == 3
 
 
-def test_aggregate_outcomes_tracks_chunk_failures_by_days():
-    runner = SeleniumRatesParallelRunner(
-        RatesParallelRunConfig(
-            category_to_group={"Category": "DELUXE"},
-            adults_counts=(3,),
-            days_to_collect=35,
-            outer_block_size_days=30,
-            date_chunk_size=10,
-        )
+def test_parser_runner_keeps_single_publish_for_partial_last_segment(monkeypatch):
+    import src.infrastructure.parsers.selenium_rates_parser_runner as parser_module
+
+    captured: dict[str, object] = {"configs": [], "replace_calls": []}
+
+    class FakeRulesRepo:
+        def get_category_to_group(self):
+            return {"Category": "DELUXE"}
+
+    class FakeParallelRunner:
+        def __init__(self, config):
+            captured["configs"].append(config)
+
+        def run(self, *, start_date):
+            return [_rate(stay_date=start_date, adults_count=2)]
+
+    class FakeDailyRatesRepo:
+        def replace_all(self, rows):
+            captured["replace_calls"].append(rows)
+
+    monkeypatch.setattr(parser_module, "SeleniumRatesParallelRunner", FakeParallelRunner)
+    monkeypatch.setattr(parser_module, "PostgresDailyRatesRepository", FakeDailyRatesRepo)
+    monkeypatch.setattr(parser_module, "sleep", lambda *_args: None)
+
+    runner = SeleniumRatesParserRunner(
+        rules_repo=FakeRulesRepo(),
+        segment_size_days=30,
+        segment_pause_seconds=0.0,
     )
 
-    stats = runner._aggregate_outcomes_by_adults(
-        [
-            ParserRunOutcome(
-                adults_count=3,
-                rates=tuple(_rate(stay_date=date(2026, 4, day), adults_count=3) for day in range(1, 11)),
-                stay_date=date(2026, 4, 1),
-                days_count=10,
-                total_found=50,
-                total_collected=40,
-                failed_fn=None,
-                elapsed_seconds=10.0,
-            ),
-            ParserRunOutcome(
-                adults_count=3,
-                rates=tuple(),
-                stay_date=date(2026, 4, 11),
-                days_count=10,
-                total_found=0,
-                total_collected=0,
-                failed_fn="get_rates_for_date",
-                elapsed_seconds=3.0,
-            ),
-        ]
+    count = runner.run(
+        start_date=date(2026, 4, 1),
+        days_to_collect=65,
+        adults_counts=(1, 2, 3, 4, 5, 6),
     )
 
-    stat = stats[0]
-    assert stat.total_days == 20
-    assert stat.success_days == 10
-    assert stat.failed_days == 10
-    assert stat.errors == ((date(2026, 4, 11), "get_rates_for_date"),)
-
-
-def test_run_batch_retries_only_failed_worker_without_duplicate_rows(monkeypatch):
-    attempts: dict[int, int] = {}
-    sleeps: list[float] = []
-
-    def fake_run_single_parser(
-        self,
-        *,
-        webdriver,
-        category_to_group,
-        adults_count,
-        stay_dates,
-        day_numbering=None,
-        chunk_numbering=None,
-    ):
-        attempts[adults_count] = attempts.get(adults_count, 0) + 1
-        if adults_count == 4 and attempts[adults_count] == 1:
-            return ParserRunOutcome(
-                adults_count=adults_count,
-                rates=tuple(_rate(stay_date=stay_date, adults_count=40) for stay_date in stay_dates),
-                stay_date=stay_dates[0],
-                days_count=len(stay_dates),
-                total_found=len(stay_dates),
-                total_collected=len(stay_dates),
-                failed_fn="get_rates_for_date",
-                elapsed_seconds=1.0,
-            )
-        return ParserRunOutcome(
-            adults_count=adults_count,
-            rates=tuple(_rate(stay_date=stay_date, adults_count=adults_count) for stay_date in stay_dates),
-            stay_date=stay_dates[0],
-            days_count=len(stay_dates),
-            total_found=len(stay_dates),
-            total_collected=len(stay_dates),
-            failed_fn=None,
-            elapsed_seconds=1.0,
-        )
-
-    monkeypatch.setattr(SeleniumRatesParallelRunner, "_run_single_parser", fake_run_single_parser)
-    monkeypatch.setattr("src.infrastructure.selenium.rates_parallel_runner.sleep", sleeps.append)
-
-    runner = SeleniumRatesParallelRunner(
-        RatesParallelRunConfig(
-            category_to_group={"Category": "DELUXE"},
-            adults_counts=(3, 4),
-            days_to_collect=10,
-            retry_count=1,
-            retry_pause_seconds=1.5,
-        )
-    )
-
-    stay_dates = [date(2026, 4, day) for day in range(1, 11)]
-    outcomes = runner._run_batch(
-        webdriver=object(),
-        category_to_group={"Category": "DELUXE"},
-        adults_counts=(3, 4),
-        stay_dates=stay_dates,
-        day_numbering=(1, 10),
-        chunk_numbering=(1, 1),
-    )
-
-    by_adults = {outcome.adults_count: outcome for outcome in outcomes}
-    assert attempts == {3: 1, 4: 2}
-    assert sleeps == [1.5]
-    assert by_adults[3].failed_fn is None
-    assert by_adults[4].failed_fn is None
-    assert len(by_adults[4].rates) == 10
-    assert all(rate.adults_count == 4 for rate in by_adults[4].rates)
+    assert count == 3
+    assert [config.days_to_collect for config in captured["configs"]] == [30, 30, 5]
+    assert len(captured["replace_calls"]) == 1
+    assert len(captured["replace_calls"][0]) == 3
