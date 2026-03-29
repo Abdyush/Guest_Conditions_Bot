@@ -90,31 +90,31 @@ class SeleniumRatesParallelRunner:
                     )
                     msg = self._short_error_text(exc)
                     self._log(
-                        f"РћРЁРР‘РљРђ, РїР°СЂСЃРµСЂ ({self._adults_label(adults_count)}), "
-                        f"(1 РґРµРЅСЊ РёР· {len(stay_dates)}) {fn_name}, {msg}"
+                        f"ОШИБКА, парсер ({self._adults_label(adults_count)}), "
+                        f"(1 день из {len(stay_dates)}) {fn_name}, {msg}"
                     )
                 outcomes.append(outcome)
                 out.extend(outcome.rates)
 
         total_elapsed = self._format_duration(perf_counter() - run_started_at)
-        self._log(f"РџР°СЂСЃРёРЅРі РєР°С‚РµРіРѕСЂРёР№ Р·Р°РєРѕРЅС‡РµРЅ, РѕР±С‰РµРµ РІСЂРµРјСЏ {total_elapsed}")
+        self._log(f"Парсинг категорий закончен, общее время {total_elapsed}")
         success_count = sum(1 for x in outcomes if x.failed_fn is None)
         self._log(
-            f"РёР· {len(self._config.adults_counts)} РїР°СЂСЃРµСЂРѕРІ "
-            f"{success_count} СѓСЃРїРµС€РЅРѕ РІС‹РїРѕР»РЅРёР»Рё СЂР°Р±РѕС‚Сѓ"
+            f"из {len(self._config.adults_counts)} парсеров "
+            f"{success_count} успешно выполнили работу"
         )
         self._log("")
         for outcome in sorted(outcomes, key=lambda x: x.adults_count):
             if outcome.failed_fn is not None:
                 self._log(
-                    f"РїР°СЂСЃРµСЂ ({self._adults_label(outcome.adults_count)}) "
-                    f"СЃР»РѕРјР°Р»СЃСЏ: {outcome.failed_fn}"
+                    f"парсер ({self._adults_label(outcome.adults_count)}) "
+                    f"сломался: {outcome.failed_fn}"
                 )
                 continue
             self._log(
-                f"РїР°СЂСЃРµСЂ ({self._adults_label(outcome.adults_count)}) СѓСЃРїРµС€РЅРѕ: "
-                f"РёР· {outcome.total_found} РЅР°Р№РґРµРЅРЅС‹С…, СЃРѕР±СЂР°Р» {outcome.total_collected}, "
-                f"РІСЂРµРјСЏ {self._format_duration(outcome.elapsed_seconds)}"
+                f"парсер ({self._adults_label(outcome.adults_count)}) успешно: "
+                f"из {outcome.total_found} найденных, собрал {outcome.total_collected}, "
+                f"время {self._format_duration(outcome.elapsed_seconds)}"
             )
 
         return out
@@ -131,7 +131,7 @@ class SeleniumRatesParallelRunner:
         days_total = len(stay_dates)
         parser_started_at = perf_counter()
 
-        self._log(f"РїР°СЂСЃРµСЂ ({adults_label}) РЅР°С‡Р°Р» СЂР°Р±РѕС‚Сѓ")
+        self._log(f"парсер ({adults_label}) начал работу")
         parsed: list[DailyRate] = []
         failed_fn: str | None = None
         totals = {"found": 0, "collected": 0}
@@ -147,7 +147,7 @@ class SeleniumRatesParallelRunner:
                 except Exception as exc:
                     fn_name = self._extract_fn_name(exc.__traceback__)
                     msg = self._short_error_text(exc)
-                    self._log(f"РћРЁРР‘РљРђ, РїР°СЂСЃРµСЂ ({adults_label}), (1 РґРµРЅСЊ РёР· {days_total}) {fn_name}, {msg}")
+                    self._log(f"ОШИБКА, парсер ({adults_label}), (1 день из {days_total}) {fn_name}, {msg}")
                     failed_fn = fn_name
                     return ParserRunOutcome(
                         adults_count=adults_count,
@@ -181,11 +181,11 @@ class SeleniumRatesParallelRunner:
                             failed_fn = fn_name
                         msg = self._short_error_text(exc)
                         self._log(
-                            f"РћРЁРР‘РљРђ, РїР°СЂСЃРµСЂ ({adults_label}), ({day_index} РґРµРЅСЊ РёР· {days_total}) "
+                            f"ОШИБКА, парсер ({adults_label}), ({day_index} день из {days_total}) "
                             f"{fn_name}, {msg}"
                         )
         finally:
-            self._log(f"РїР°СЂСЃРµСЂ ({adults_label}) Р·Р°РєРѕРЅС‡РёР» СЂР°Р±РѕС‚Сѓ")
+            self._log(f"парсер ({adults_label}) закончил работу")
 
         return ParserRunOutcome(
             adults_count=adults_count,
@@ -220,8 +220,8 @@ class SeleniumRatesParallelRunner:
                 state["total"] = len(categories)
                 totals["found"] += state["total"]
                 self._log(
-                    f"РїР°СЂСЃРµСЂ ({adults_label}), ({day_index} РґРµРЅСЊ РёР· {days_total}) "
-                    f"РЅР°С€РµР» {state['total']} РєР°С‚РµРіРѕСЂРёР№ РЅР° РґР°С‚Сѓ {date_label}"
+                    f"парсер ({adults_label}), ({day_index} день из {days_total}) "
+                    f"нашел {state['total']} категорий на дату {date_label}"
                 )
             return categories
 
@@ -232,8 +232,8 @@ class SeleniumRatesParallelRunner:
                 totals["collected"] += 1
                 total = state["total"] if state["total"] is not None else "?"
                 self._log(
-                    f"РїР°СЂСЃРµСЂ ({adults_label}), ({day_index} РґРµРЅСЊ РёР· {days_total}), "
-                    f"СЃРѕР±СЂР°Р» РґР°РЅРЅС‹Рµ {state['collected']} РєР°С‚РµРіРѕСЂРёРё РёР· {total} РЅР° РґР°С‚Сѓ {date_label}"
+                    f"парсер ({adults_label}), ({day_index} день из {days_total}), "
+                    f"собрал данные {state['collected']} категории из {total} на дату {date_label}"
                 )
             return item
 
@@ -247,8 +247,8 @@ class SeleniumRatesParallelRunner:
     @staticmethod
     def _adults_label(adults_count: int) -> str:
         if adults_count == 1:
-            return "1 РІР·СЂРѕСЃР»С‹Р№"
-        return f"{adults_count} РІР·СЂРѕСЃР»С‹С…"
+            return "1 взрослый"
+        return f"{adults_count} взрослых"
 
     @staticmethod
     def _extract_fn_name(traceback: TracebackType | None) -> str:
@@ -275,4 +275,4 @@ class SeleniumRatesParallelRunner:
         hours = total_seconds // 3600
         minutes = (total_seconds % 3600) // 60
         secs = total_seconds % 60
-        return f"{hours} С‡Р°СЃ. {minutes} РјРёРЅ. {secs} СЃРµРє."
+        return f"{hours} час. {minutes} мин. {secs} сек."
