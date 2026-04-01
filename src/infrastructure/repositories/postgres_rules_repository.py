@@ -6,7 +6,7 @@ from io import StringIO
 from pathlib import Path
 
 from sqlalchemy import INTEGER, TEXT, Column, MetaData, Table, create_engine, select, text
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import Engine, URL, make_url
 
 from src.application.ports.rules_repository import RulesRepository
 from src.domain.services.child_supplement_policy import ChildSupplementPolicy
@@ -52,11 +52,39 @@ def _parse_pricing_mode(raw: str | None) -> PricingMode:
     return PricingMode.FLAT
 
 
+def _clean_database_url(raw: str) -> str:
+    cleaned = raw.strip().strip("'\"").replace("\ufeff", "")
+    for bad in ("\u00a0", "\u200b", "\u200c", "\u200d", "\u2060", "\u2018", "\u2019", "\u201c", "\u201d"):
+        cleaned = cleaned.replace(bad, "")
+    return cleaned
+
+
+def _resolve_database_url(database_url: str | None) -> URL:
+    raw_url = database_url or os.getenv("DATABASE_URL")
+    if raw_url:
+        return make_url(_clean_database_url(raw_url))
+
+    db_name = _clean_database_url(os.getenv("POSTGRES_DB") or "")
+    user = _clean_database_url(os.getenv("POSTGRES_USER") or "")
+    password_raw = os.getenv("POSTGRES_PASSWORD")
+    password = _clean_database_url(password_raw) if password_raw is not None else None
+    host = _clean_database_url(os.getenv("POSTGRES_HOST") or "localhost")
+    port_raw = _clean_database_url(os.getenv("POSTGRES_PORT") or "5432")
+    if not db_name or not user or password is None:
+        raise ValueError("DATABASE_URL or POSTGRES_DB/POSTGRES_USER/POSTGRES_PASSWORD is required")
+    return URL.create(
+        drivername="postgresql+psycopg2",
+        username=user,
+        password=password,
+        host=host,
+        port=int(port_raw),
+        database=db_name,
+    )
+
+
 class PostgresRulesRepository(RulesRepository):
     def __init__(self, database_url: str | None = None):
-        url = database_url or os.getenv("DATABASE_URL")
-        if not url:
-            raise ValueError("DATABASE_URL is required for PostgresRulesRepository")
+        url = _resolve_database_url(database_url)
         self._engine = create_engine(url, future=True)
         self._init_schema(self._engine)
 

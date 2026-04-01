@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 from datetime import date
+from pathlib import Path
 
 try:
     from _runtime import ensure_project_on_sys_path, load_env_if_available
@@ -76,16 +77,26 @@ def main() -> None:
     load_env_if_available()
     args = build_parser().parse_args()
 
+    from src.infrastructure.loaders.category_rules_loader import load_category_rules
     from src.infrastructure.selenium.rates_parallel_runner import (
         RatesParallelRunConfig,
         SeleniumRatesParallelRunner,
     )
     from src.infrastructure.repositories.postgres_rules_repository import PostgresRulesRepository
 
-    rules_repo = PostgresRulesRepository()
+    rules_csv_path = Path(args.rules_csv) if args.rules_csv else ROOT / "data" / "category_rules.csv"
+    try:
+        category_to_group = PostgresRulesRepository().get_category_to_group()
+    except Exception as exc:
+        if not rules_csv_path.exists():
+            raise RuntimeError(
+                f"Failed to load category rules from Postgres ({exc}) and CSV fallback was not found: {rules_csv_path}"
+            ) from exc
+        category_to_group, _, _ = load_category_rules(rules_csv_path)
+        print(f"WARNING: Postgres category rules unavailable, using CSV fallback: {rules_csv_path}")
 
     config = RatesParallelRunConfig(
-        category_to_group=rules_repo.get_category_to_group(),
+        category_to_group=category_to_group,
         adults_counts=_parse_adults(args.adults),
         days_to_collect=args.days_to_collect,
         headless=not args.visible,

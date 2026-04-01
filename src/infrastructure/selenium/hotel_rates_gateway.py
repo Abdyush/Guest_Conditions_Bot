@@ -11,10 +11,12 @@ from selenium.webdriver.support.ui import WebDriverWait
 from src.infrastructure.selenium.contracts import ScrapedCategoryRate
 
 
-def _find_dates_by_month(frame) -> dict[str, list]:
-    time.sleep(2)
-    frame2 = frame.find_element(By.XPATH, "//div[@data-mode]")
-    months = frame2.find_elements(By.XPATH, './/div[@data-month]')
+def _find_calendar_root(frame):
+    return frame.find_element(By.XPATH, "//div[@data-mode]")
+
+
+def _find_dates_by_month(calendar_root) -> dict[str, list]:
+    months = calendar_root.find_elements(By.XPATH, './/div[@data-month]')
     if len(months) < 2:
         raise RuntimeError("Could not read booking calendar months from page")
 
@@ -23,6 +25,15 @@ def _find_dates_by_month(frame) -> dict[str, list]:
         data_months[0][:7]: [d for d in months[0].find_elements(By.XPATH, './/span') if d.text.isdigit()],
         data_months[1][:7]: [d for d in months[1].find_elements(By.XPATH, './/span') if d.text.isdigit()],
     }
+
+
+def _switch_calendar_month(calendar_root) -> None:
+    nav = calendar_root.find_element(By.TAG_NAME, "nav")
+    buttons = nav.find_elements(By.TAG_NAME, "button")
+    if len(buttons) < 2:
+        raise RuntimeError("Calendar month switch button not found")
+    buttons[1].click()
+    time.sleep(1)
 
 
 def _find_date_button(dt: date, dates_by_month: dict[str, list], *, checkout: bool):
@@ -89,8 +100,15 @@ class SeleniumHotelRatesGateway:
         modal = self._browser.find_element(By.CLASS_NAME, "x-modal__container")
         time.sleep(2)
 
-        dates = _find_dates_by_month(modal)
-        arrival_btn = _find_date_button(stay_date, dates, checkout=False)
+        calendar_root = _find_calendar_root(modal)
+        dates = _find_dates_by_month(calendar_root)
+        try:
+            arrival_btn = _find_date_button(stay_date, dates, checkout=False)
+        except RuntimeError:
+            _switch_calendar_month(calendar_root)
+            calendar_root = _find_calendar_root(modal)
+            dates = _find_dates_by_month(calendar_root)
+            arrival_btn = _find_date_button(stay_date, dates, checkout=False)
         self._browser.execute_script("arguments[0].scrollIntoView({block: 'center'});", arrival_btn)
         self._wait.until(EC.element_to_be_clickable(arrival_btn)).click()
 
@@ -99,15 +117,21 @@ class SeleniumHotelRatesGateway:
         self._wait.until(EC.element_to_be_clickable(checkout_btn)).click()
 
     def _find_categories(self) -> list:
-        selected_buttons = []
-        while True:
-            start = len(selected_buttons)
-            tmp = [x for x in self._browser.find_elements(By.CLASS_NAME, "tl-btn") if x.text.strip()]
-            selected_buttons = list(set(selected_buttons).union(set(tmp)))
-            if len(selected_buttons) == start:
-                return tmp
-            self._browser.execute_script("arguments[0].scrollIntoView(true);", tmp[-1])
-            time.sleep(1)
+        try:
+            self._browser.find_element(By.CSS_SELECTOR,
+                                        "[tl-message*='closest_available_dates']")
+            return []
+        
+        except:
+            selected_buttons = []
+            while True:
+                start = len(selected_buttons)
+                tmp = [x for x in self._browser.find_elements(By.CLASS_NAME, "tl-btn") if x.text.strip()]
+                selected_buttons = list(set(selected_buttons).union(set(tmp)))
+                if len(selected_buttons) == start:
+                    return tmp
+                self._browser.execute_script("arguments[0].scrollIntoView(true);", tmp[-1])
+                time.sleep(1)
 
     @staticmethod
     def _is_last_room(category_button) -> bool:
