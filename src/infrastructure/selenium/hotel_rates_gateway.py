@@ -12,6 +12,7 @@ from src.infrastructure.selenium.contracts import ScrapedCategoryRate
 
 
 def _find_dates_by_month(frame) -> dict[str, list]:
+    time.sleep(2)
     frame2 = frame.find_element(By.XPATH, "//div[@data-mode]")
     months = frame2.find_elements(By.XPATH, './/div[@data-month]')
     if len(months) < 2:
@@ -165,6 +166,7 @@ class SeleniumHotelRatesGateway:
             if item is not None:
                 results.append(item)
 
+            time.sleep(4)
             back_btn = self._browser.find_element(By.CLASS_NAME, "x-hnp__link")
             self._wait.until(EC.element_to_be_clickable(back_btn))
             self._browser.execute_script("arguments[0].click();", back_btn)

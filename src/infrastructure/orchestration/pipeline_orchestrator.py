@@ -90,6 +90,13 @@ class PipelineOrchestrator:
         self._run_lock = asyncio.Lock()
         self._active_run_name = "idle"
 
+    @property
+    def active_run_name(self) -> str:
+        return self._active_run_name
+
+    def is_busy(self) -> bool:
+        return self._run_lock.locked()
+
     async def run_daily_pipeline(self, *, bot: object | None, trigger: str, with_notifications: bool = True) -> RunAttempt:
         if self._run_lock.locked():
             self._admin.log_admin_event(

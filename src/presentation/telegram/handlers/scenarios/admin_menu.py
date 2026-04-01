@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import asyncio
+from collections.abc import Awaitable, Callable
+
 from telegram import Update
 from telegram.ext import ContextTypes
 
+from src.infrastructure.orchestration.pipeline_orchestrator import RunAttempt
 from src.presentation.telegram.callbacks.data_parser import (
     ADMIN_OPEN_MAIN,
     ADMIN_OPEN_REPORTS,
@@ -198,7 +202,10 @@ class AdminMenuScenario:
 
     async def _handle_system_action(self, *, telegram_user_id: int, text: str, message) -> bool:
         if text == ADMIN_RUN_RATES_BUTTON:
-            attempt = await self._deps.pipeline.run_categories_parser(trigger=f"admin_menu:{telegram_user_id}:rates")
+            attempt = await self._start_background_run(
+                runner=self._deps.pipeline.run_categories_parser,
+                trigger=f"admin_menu:{telegram_user_id}:rates",
+            )
             await message.reply_text(
                 render_system_attempt_result(
                     title="Запуск парсера цен",
@@ -209,7 +216,10 @@ class AdminMenuScenario:
             )
             return True
         if text == ADMIN_RUN_OFFERS_BUTTON:
-            attempt = await self._deps.pipeline.run_offers_parser(trigger=f"admin_menu:{telegram_user_id}:offers")
+            attempt = await self._start_background_run(
+                runner=self._deps.pipeline.run_offers_parser,
+                trigger=f"admin_menu:{telegram_user_id}:offers",
+            )
             await message.reply_text(
                 render_system_attempt_result(
                     title="Запуск парсера офферов",
@@ -220,7 +230,10 @@ class AdminMenuScenario:
             )
             return True
         if text == ADMIN_RUN_RECALC_BUTTON:
-            attempt = await self._deps.pipeline.run_recalculation(trigger=f"admin_menu:{telegram_user_id}:recalculation")
+            attempt = await self._start_background_run(
+                runner=self._deps.pipeline.run_recalculation,
+                trigger=f"admin_menu:{telegram_user_id}:recalculation",
+            )
             await message.reply_text(
                 render_system_attempt_result(
                     title="Запуск пересчета цен",
@@ -235,7 +248,10 @@ class AdminMenuScenario:
     async def _handle_system_callback(self, *, telegram_user_id: int, query, data: str) -> None:
         if data == ADMIN_SYSTEM_RATES:
             await query.answer()
-            attempt = await self._deps.pipeline.run_categories_parser(trigger=f"admin_menu:{telegram_user_id}:rates")
+            attempt = await self._start_background_run(
+                runner=self._deps.pipeline.run_categories_parser,
+                trigger=f"admin_menu:{telegram_user_id}:rates",
+            )
             if query.message is not None:
                 await query.edit_message_text(
                     render_system_attempt_result(
@@ -248,7 +264,10 @@ class AdminMenuScenario:
             return
         if data == ADMIN_SYSTEM_OFFERS:
             await query.answer()
-            attempt = await self._deps.pipeline.run_offers_parser(trigger=f"admin_menu:{telegram_user_id}:offers")
+            attempt = await self._start_background_run(
+                runner=self._deps.pipeline.run_offers_parser,
+                trigger=f"admin_menu:{telegram_user_id}:offers",
+            )
             if query.message is not None:
                 await query.edit_message_text(
                     render_system_attempt_result(
@@ -261,7 +280,10 @@ class AdminMenuScenario:
             return
         if data == ADMIN_SYSTEM_RECALC:
             await query.answer()
-            attempt = await self._deps.pipeline.run_recalculation(trigger=f"admin_menu:{telegram_user_id}:recalculation")
+            attempt = await self._start_background_run(
+                runner=self._deps.pipeline.run_recalculation,
+                trigger=f"admin_menu:{telegram_user_id}:recalculation",
+            )
             if query.message is not None:
                 await query.edit_message_text(
                     render_system_attempt_result(
@@ -400,6 +422,18 @@ class AdminMenuScenario:
 
     async def _show_reply_shell(self, message, *, text: str, reply_markup) -> None:
         await message.reply_text(text, reply_markup=reply_markup)
+
+    async def _start_background_run(
+        self,
+        *,
+        runner: Callable[..., Awaitable[RunAttempt]],
+        trigger: str,
+    ) -> RunAttempt:
+        if self._deps.pipeline.is_busy():
+            return RunAttempt(started=False, message=f"busy:{self._deps.pipeline.active_run_name}")
+        asyncio.create_task(runner(trigger=trigger))
+        await asyncio.sleep(0)
+        return RunAttempt(started=True, message="scheduled")
 
     async def _exit_to_guest_menu(self, *, telegram_user_id: int, message) -> None:
         await self._deps.sessions.reset(telegram_user_id)
