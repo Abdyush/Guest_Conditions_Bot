@@ -72,8 +72,8 @@ class SeleniumRatesParserRunner:
     batch_pause_seconds: float = 3.0
     retry_count: int = 1
     retry_pause_seconds: float = 1.0
-    segment_size_days: int = 30
-    segment_pause_seconds: float = 5.0
+    segment_size_days: int = 10
+    segment_pause_seconds: float = 60.0
 
     def run(self, *, start_date: date, days_to_collect: int, adults_counts: tuple[int, ...]) -> int:
         category_to_group = self.rules_repo.get_category_to_group()

@@ -26,41 +26,53 @@ def _rate(*, stay_date: date, adults_count: int) -> DailyRate:
     )
 
 
-def test_build_rates_segments_splits_90_days_into_three_segments_of_30():
+def test_build_rates_segments_splits_90_days_into_nine_segments_of_10():
     segments = build_rates_segments(
         start_date=date(2026, 4, 1),
         days_to_collect=90,
-        segment_size_days=30,
+        segment_size_days=10,
     )
 
     assert [(segment.start_date, segment.days_to_collect) for segment in segments] == [
-        (date(2026, 4, 1), 30),
-        (date(2026, 5, 1), 30),
-        (date(2026, 5, 31), 30),
+        (date(2026, 4, 1), 10),
+        (date(2026, 4, 11), 10),
+        (date(2026, 4, 21), 10),
+        (date(2026, 5, 1), 10),
+        (date(2026, 5, 11), 10),
+        (date(2026, 5, 21), 10),
+        (date(2026, 5, 31), 10),
+        (date(2026, 6, 10), 10),
+        (date(2026, 6, 20), 10),
     ]
     assert [(segment.start_day_number, segment.end_day_number) for segment in segments] == [
-        (1, 30),
-        (31, 60),
-        (61, 90),
+        (1, 10),
+        (11, 20),
+        (21, 30),
+        (31, 40),
+        (41, 50),
+        (51, 60),
+        (61, 70),
+        (71, 80),
+        (81, 90),
     ]
 
 
-def test_build_rates_segments_keeps_last_partial_segment():
+def test_build_rates_segments_keeps_last_partial_segment_for_ten_day_split():
     segments = build_rates_segments(
         start_date=date(2026, 4, 1),
-        days_to_collect=65,
-        segment_size_days=30,
+        days_to_collect=25,
+        segment_size_days=10,
     )
 
     assert [(segment.start_date, segment.days_to_collect) for segment in segments] == [
-        (date(2026, 4, 1), 30),
-        (date(2026, 5, 1), 30),
-        (date(2026, 5, 31), 5),
+        (date(2026, 4, 1), 10),
+        (date(2026, 4, 11), 10),
+        (date(2026, 4, 21), 5),
     ]
     assert [(segment.start_day_number, segment.end_day_number) for segment in segments] == [
-        (1, 30),
-        (31, 60),
-        (61, 65),
+        (1, 10),
+        (11, 20),
+        (21, 25),
     ]
 
 
@@ -98,7 +110,7 @@ def test_parallel_runner_uses_old_profile_single_executor_for_all_adults(monkeyp
     assert len(out) == 180
 
 
-def test_parser_runner_runs_three_segments_and_publishes_once(monkeypatch):
+def test_parser_runner_runs_nine_segments_and_publishes_once(monkeypatch):
     import src.infrastructure.parsers.selenium_rates_parser_runner as parser_module
 
     captured: dict[str, object] = {"run_calls": [], "replace_calls": []}
@@ -127,8 +139,8 @@ def test_parser_runner_runs_three_segments_and_publishes_once(monkeypatch):
         rules_repo=FakeRulesRepo(),
         headless=False,
         wait_seconds=11,
-        segment_size_days=30,
-        segment_pause_seconds=5.0,
+        segment_size_days=10,
+        segment_pause_seconds=60.0,
     )
 
     count = runner.run(
@@ -137,17 +149,27 @@ def test_parser_runner_runs_three_segments_and_publishes_once(monkeypatch):
         adults_counts=(1, 2, 3, 4, 5, 6),
     )
 
-    assert count == 3
-    assert captured["run_calls"] == [date(2026, 4, 1), date(2026, 5, 1), date(2026, 5, 31)]
-    assert [config.days_to_collect for config in captured["configs"]] == [30, 30, 30]
+    assert count == 9
+    assert captured["run_calls"] == [
+        date(2026, 4, 1),
+        date(2026, 4, 11),
+        date(2026, 4, 21),
+        date(2026, 5, 1),
+        date(2026, 5, 11),
+        date(2026, 5, 21),
+        date(2026, 5, 31),
+        date(2026, 6, 10),
+        date(2026, 6, 20),
+    ]
+    assert [config.days_to_collect for config in captured["configs"]] == [10, 10, 10, 10, 10, 10, 10, 10, 10]
     assert all(config.adults_counts == (1, 2, 3, 4, 5, 6) for config in captured["configs"])
     assert all(config.headless is False for config in captured["configs"])
     assert all(config.wait_seconds == 11 for config in captured["configs"])
     assert len(captured["replace_calls"]) == 1
-    assert len(captured["replace_calls"][0]) == 3
+    assert len(captured["replace_calls"][0]) == 9
 
 
-def test_parser_runner_keeps_single_publish_for_partial_last_segment(monkeypatch):
+def test_parser_runner_keeps_single_publish_for_partial_last_ten_day_segment(monkeypatch):
     import src.infrastructure.parsers.selenium_rates_parser_runner as parser_module
 
     captured: dict[str, object] = {"configs": [], "replace_calls": []}
@@ -173,17 +195,17 @@ def test_parser_runner_keeps_single_publish_for_partial_last_segment(monkeypatch
 
     runner = SeleniumRatesParserRunner(
         rules_repo=FakeRulesRepo(),
-        segment_size_days=30,
+        segment_size_days=10,
         segment_pause_seconds=0.0,
     )
 
     count = runner.run(
         start_date=date(2026, 4, 1),
-        days_to_collect=65,
+        days_to_collect=25,
         adults_counts=(1, 2, 3, 4, 5, 6),
     )
 
     assert count == 3
-    assert [config.days_to_collect for config in captured["configs"]] == [30, 30, 5]
+    assert [config.days_to_collect for config in captured["configs"]] == [10, 10, 5]
     assert len(captured["replace_calls"]) == 1
     assert len(captured["replace_calls"][0]) == 3
