@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 from datetime import date, timedelta
 
+from selenium.common.exceptions import NoSuchElementException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.support import expected_conditions as EC
@@ -121,15 +122,20 @@ class SeleniumHotelRatesGateway:
             self._browser.find_element(By.CSS_SELECTOR,
                                         "[tl-message*='closest_available_dates']")
             return []
-        
-        except:
+        except NoSuchElementException:
             selected_buttons = []
             while True:
                 start = len(selected_buttons)
-                tmp = [x for x in self._browser.find_elements(By.CLASS_NAME, "tl-btn") if x.text.strip()]
+                tmp = [
+                    x
+                    for x in self._browser.find_elements(By.CLASS_NAME, "tl-btn")
+                    if x.text.strip() == "Выбрать"
+                ]
+                if not tmp:
+                    raise RuntimeError("Category buttons with text 'Выбрать' not found on page")
                 selected_buttons = list(set(selected_buttons).union(set(tmp)))
                 if len(selected_buttons) == start:
-                    return tmp
+                    return selected_buttons
                 self._browser.execute_script("arguments[0].scrollIntoView(true);", tmp[-1])
                 time.sleep(1)
 

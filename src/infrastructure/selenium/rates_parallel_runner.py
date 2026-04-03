@@ -132,6 +132,10 @@ class SeleniumRatesParallelRunner:
         parser_started_at = perf_counter()
 
         self._log(f"парсер ({adults_label}) начал работу")
+        if stay_dates:
+            self._log(
+                f"parser ({adults_label}) window {stay_dates[0].isoformat()}..{stay_dates[-1].isoformat()}"
+            )
         parsed: list[DailyRate] = []
         failed_fn: str | None = None
         totals = {"found": 0, "collected": 0}
@@ -159,6 +163,9 @@ class SeleniumRatesParallelRunner:
                     )
                 for day_index, stay_date in enumerate(stay_dates, start=1):
                     try:
+                        self._log(
+                            f"parser ({adults_label}) day {day_index}/{days_total} stay_date={stay_date.isoformat()}"
+                        )
                         self._install_day_logging_hooks(
                             gateway=gateway,
                             adults_label=adults_label,
@@ -212,7 +219,7 @@ class SeleniumRatesParallelRunner:
         )
 
         state = {"total": None, "collected": 0}
-        date_label = stay_date.strftime("%d.%m.%y")
+        date_label = stay_date.isoformat()
 
         def logged_find_categories():
             categories = original_find_categories()
