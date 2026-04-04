@@ -422,7 +422,7 @@ class InterestRequestSubflow:
 
         return open_price_minor, preliminary_price_minor, loyalty_status, _merge_adjacent_special_offers(special_offers)
 
-def _responsible_contact_url(self) -> str | None:
+    def _responsible_contact_url(self) -> str | None:
         if self._deps.admin_telegram_id is None:
             return None
         return f"tg://user?id={self._deps.admin_telegram_id}"

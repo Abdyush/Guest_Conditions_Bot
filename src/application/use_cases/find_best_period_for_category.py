@@ -1,9 +1,11 @@
 from __future__ import annotations
 
-from datetime import date
+from collections import defaultdict
+from datetime import date, timedelta
 from typing import Iterable
 
 from src.application.dto.period_pick import PeriodPickDTO
+from src.domain.services.date_price_selector import DatePriceCandidate
 from src.domain.entities.guest_preferences import GuestPreferences
 from src.domain.entities.offer import Offer
 from src.domain.entities.rate import DailyRate
@@ -72,8 +74,19 @@ def find_best_period_for_category(
 
     min_round = min(line.new_price.round_rubles() for line in lines)
     candidates = [line for line in lines if line.new_price.round_rubles() == min_round]
-    candidates.sort(key=lambda x: x.day)
-    return _to_period_pick(candidates, group_id=normalized_group_id)
+    by_tariff: dict[str, list[DatePriceCandidate]] = defaultdict(list)
+    for line in candidates:
+        by_tariff[line.tariff_code].append(line)
+
+    picks: list[PeriodPickDTO] = []
+    for tariff_lines in by_tariff.values():
+        tariff_lines.sort(key=lambda x: x.day)
+        picks.extend(_build_period_picks(tariff_lines, group_id=normalized_group_id))
+
+    if not picks:
+        return None
+    picks.sort(key=lambda x: (-x.nights, x.new_price_per_night.amount, x.start_date))
+    return picks[0]
 
 
 def _build_pricing_service(
@@ -113,3 +126,21 @@ def _to_period_pick(lines, *, group_id: str) -> PeriodPickDTO:
         applied_bank_status=selected.applied_bank_status,
         applied_bank_percent=selected.applied_bank_percent,
     )
+
+
+def _build_period_picks(lines: list[DatePriceCandidate], *, group_id: str) -> list[PeriodPickDTO]:
+    if not lines:
+        return []
+
+    out: list[PeriodPickDTO] = []
+    current: list[DatePriceCandidate] = [lines[0]]
+
+    for line in lines[1:]:
+        if line.day == current[-1].day + timedelta(days=1):
+            current.append(line)
+            continue
+        out.append(_to_period_pick(current, group_id=group_id))
+        current = [line]
+
+    out.append(_to_period_pick(current, group_id=group_id))
+    return out

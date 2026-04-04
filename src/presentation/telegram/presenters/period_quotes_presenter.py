@@ -228,19 +228,22 @@ def _render_tariff_block_legacy(quote: PeriodQuote) -> list[str]:
 def _render_discount_lines(quotes: Iterable[PeriodQuote]) -> list[str]:
     lines: list[str] = []
     seen: set[str] = set()
+    for offer_title, offer_repr, applied_from, applied_to in _merge_offer_periods(quotes):
+        offer_name = f"\u00ab{offer_title}\u00bb" if offer_title else "\u0421\u043f\u0435\u0446\u043f\u0440\u0435\u0434\u043b\u043e\u0436\u0435\u043d\u0438\u0435"
+        period_suffix = ""
+        if applied_from and applied_to:
+            period_suffix = (
+                " , \u0434\u0435\u0439\u0441\u0442\u0432\u0438\u0435 \u0441\u043f\u0435\u0446\u043f\u0440\u0435\u0434\u043b\u043e\u0436\u0435\u043d\u0438\u044f "
+                f"{format_booking_period(start_date=applied_from, end_date_inclusive=applied_to, separator=' \u2013 ')}"
+            )
+        label = f"\u2022 {offer_name} \u2014 {offer_repr}{period_suffix}"
+        if label not in seen:
+            lines.append(label)
+            seen.add(label)
+
     for quote in quotes:
         if quote.offer_repr:
-            offer_name = f"\u00ab{quote.offer_title}\u00bb" if quote.offer_title else "\u0421\u043f\u0435\u0446\u043f\u0440\u0435\u0434\u043b\u043e\u0436\u0435\u043d\u0438\u0435"
-            period_suffix = ""
-            if quote.applied_from and quote.applied_to:
-                period_suffix = (
-                    " , \u0434\u0435\u0439\u0441\u0442\u0432\u0438\u0435 \u0441\u043f\u0435\u0446\u043f\u0440\u0435\u0434\u043b\u043e\u0436\u0435\u043d\u0438\u044f "
-                    f"{format_booking_period(start_date=quote.applied_from, end_date_inclusive=quote.applied_to, separator=' \u2013 ')}"
-                )
-            label = f"\u2022 {offer_name} \u2014 {quote.offer_repr}{period_suffix}"
-            if label not in seen:
-                lines.append(label)
-                seen.add(label)
+            continue
         if quote.bank_status and quote.bank_percent is not None:
             label = f"\u2022 {_format_bank_discount_name(quote.bank_status)} \u2014 {_format_percent_text(quote.bank_percent)}"
             if label not in seen:
@@ -314,6 +317,52 @@ def tariff_label(value: str) -> str:
 def _sorted_quotes(quotes: list[PeriodQuote]) -> list[PeriodQuote]:
     order = {"breakfast": 0, "fullpansion": 1}
     return sorted(quotes, key=lambda item: (order.get(item.tariff.strip().lower(), 99), item.applied_from, item.applied_to))
+
+
+def _merge_offer_periods(quotes: Iterable[PeriodQuote]) -> list[tuple[str | None, str, object, object]]:
+    offer_quotes = [
+        quote
+        for quote in quotes
+        if quote.offer_repr
+    ]
+    if not offer_quotes:
+        return []
+
+    ordered = sorted(
+        offer_quotes,
+        key=lambda item: (
+            item.offer_title or "",
+            item.offer_repr or "",
+            item.applied_from,
+            item.applied_to,
+        ),
+    )
+
+    merged: list[tuple[str | None, str, object, object]] = []
+    current = ordered[0]
+    current_title = current.offer_title
+    current_repr = current.offer_repr or ""
+    current_start = current.applied_from
+    current_end = current.applied_to
+
+    for quote in ordered[1:]:
+        if (
+            quote.offer_title == current_title
+            and (quote.offer_repr or "") == current_repr
+            and quote.applied_from <= current_end + timedelta(days=1)
+        ):
+            if quote.applied_to > current_end:
+                current_end = quote.applied_to
+            continue
+
+        merged.append((current_title, current_repr, current_start, current_end))
+        current_title = quote.offer_title
+        current_repr = quote.offer_repr or ""
+        current_start = quote.applied_from
+        current_end = quote.applied_to
+
+    merged.append((current_title, current_repr, current_start, current_end))
+    return merged
 
 
 def _build_tariff_summaries(quotes: list[PeriodQuote]) -> list[TariffQuoteSummary]:
