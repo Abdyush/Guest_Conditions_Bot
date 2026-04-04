@@ -18,12 +18,14 @@ def build_interest_request_calendar_inline_keyboard(
     month_cursor,
     checkin,
     checkout,
+    available_dates,
     parent_back_text: str,
 ) -> InlineKeyboardMarkup:
     keyboard = build_period_calendar_keyboard(
         month_cursor=month_cursor,
         checkin=checkin,
         checkout=checkout,
+        available_dates=available_dates,
         callback_prefix="avreq:cal",
     )
     rows = [list(row) for row in keyboard.inline_keyboard]

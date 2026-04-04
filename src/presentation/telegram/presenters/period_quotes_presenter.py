@@ -1,11 +1,19 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Iterable
 
 from src.application.dto.period_quote import PeriodQuote
 from src.presentation.telegram.presenters.available_presenter import format_price_minor
 from src.presentation.telegram.presenters.booking_period import format_booking_period, format_ui_date
+
+
+@dataclass(frozen=True, slots=True)
+class TariffQuoteSummary:
+    tariff: str
+    total_old_minor: int
+    total_new_minor: int
 
 
 def render_period_quotes_groups_prompt() -> str:
@@ -74,6 +82,7 @@ def render_best_period_quote_card(
         quotes=quotes,
         last_room_dates=last_room_dates,
         period_label="\U0001f48e \u0421\u0430\u043c\u044b\u0439 \u0432\u044b\u0433\u043e\u0434\u043d\u044b\u0439 \u043f\u0435\u0440\u0438\u043e\u0434:",
+        pricing_mode="per_night",
     )
 
 
@@ -85,6 +94,7 @@ def _render_period_quote_card_blocks(
     quotes: list[PeriodQuote],
     last_room_dates: list,
     period_label: str | None = None,
+    pricing_mode: str = "total",
 ) -> str:
     blocks = [f"\U0001f3e1 {category_name}"]
 
@@ -102,7 +112,10 @@ def _render_period_quote_card_blocks(
             f"\U0001f4c5 {format_booking_period(start_date=period_start, end_date_inclusive=period_end, separator=' \u2013 ')}"
         )
 
-    tariff_blocks = ["\n".join(_render_tariff_block(quote)) for quote in _sorted_quotes(quotes)]
+    if pricing_mode == "per_night":
+        tariff_blocks = ["\n".join(_render_tariff_block_per_night(quote)) for quote in _sorted_quotes(quotes)]
+    else:
+        tariff_blocks = ["\n".join(_render_tariff_block(summary)) for summary in _build_tariff_summaries(quotes)]
     if tariff_blocks:
         blocks.append("\n\n".join(tariff_blocks))
 
@@ -157,7 +170,20 @@ def format_date(value) -> str:
     return format_ui_date(value)
 
 
-def _render_tariff_block(quote: PeriodQuote) -> list[str]:
+def _render_tariff_block(summary: TariffQuoteSummary) -> list[str]:
+    benefit_minor = summary.total_old_minor - summary.total_new_minor
+    lines = [f"\U0001f37d {tariff_label(summary.tariff)}"]
+    lines.extend(
+        [
+            f"\u0426\u0435\u043d\u0430 \u0440\u044b\u043d\u043a\u0430: {format_minor_amount(summary.total_old_minor)} \u20bd \u0437\u0430 \u043f\u0435\u0440\u0438\u043e\u0434",
+            f"\u0412\u0430\u0448\u0430 \u0446\u0435\u043d\u0430: {format_minor_amount(summary.total_new_minor)} \u20bd \u0437\u0430 \u043f\u0435\u0440\u0438\u043e\u0434",
+            f"\u0412\u044b\u0433\u043e\u0434\u0430: {format_minor_amount(benefit_minor)} \u20bd \u0437\u0430 \u043f\u0435\u0440\u0438\u043e\u0434",
+        ]
+    )
+    return lines
+
+
+def _render_tariff_block_per_night(quote: PeriodQuote) -> list[str]:
     old_per_night = _minor_per_night(quote.total_old_minor, quote.nights)
     new_per_night = _minor_per_night(quote.total_new_minor, quote.nights)
     benefit = old_per_night - new_per_night
@@ -205,7 +231,13 @@ def _render_discount_lines(quotes: Iterable[PeriodQuote]) -> list[str]:
     for quote in quotes:
         if quote.offer_repr:
             offer_name = f"\u00ab{quote.offer_title}\u00bb" if quote.offer_title else "\u0421\u043f\u0435\u0446\u043f\u0440\u0435\u0434\u043b\u043e\u0436\u0435\u043d\u0438\u0435"
-            label = f"\u2022 {offer_name} \u2014 {quote.offer_repr}"
+            period_suffix = ""
+            if quote.applied_from and quote.applied_to:
+                period_suffix = (
+                    " , \u0434\u0435\u0439\u0441\u0442\u0432\u0438\u0435 \u0441\u043f\u0435\u0446\u043f\u0440\u0435\u0434\u043b\u043e\u0436\u0435\u043d\u0438\u044f "
+                    f"{format_booking_period(start_date=quote.applied_from, end_date_inclusive=quote.applied_to, separator=' \u2013 ')}"
+                )
+            label = f"\u2022 {offer_name} \u2014 {quote.offer_repr}{period_suffix}"
             if label not in seen:
                 lines.append(label)
                 seen.add(label)
@@ -259,6 +291,10 @@ def format_money(amount: Decimal) -> str:
     return format_price_minor(minor)
 
 
+def format_minor_amount(amount_minor: int) -> str:
+    return format_price_minor(amount_minor)
+
+
 def format_money_legacy(amount: Decimal) -> str:
     normalized = amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     if normalized == normalized.to_integral():
@@ -278,6 +314,29 @@ def tariff_label(value: str) -> str:
 def _sorted_quotes(quotes: list[PeriodQuote]) -> list[PeriodQuote]:
     order = {"breakfast": 0, "fullpansion": 1}
     return sorted(quotes, key=lambda item: (order.get(item.tariff.strip().lower(), 99), item.applied_from, item.applied_to))
+
+
+def _build_tariff_summaries(quotes: list[PeriodQuote]) -> list[TariffQuoteSummary]:
+    grouped: dict[str, TariffQuoteSummary] = {}
+    order = {"breakfast": 0, "fullpansion": 1}
+
+    for quote in quotes:
+        key = quote.tariff.strip().lower()
+        current = grouped.get(key)
+        if current is None:
+            grouped[key] = TariffQuoteSummary(
+                tariff=quote.tariff,
+                total_old_minor=quote.total_old_minor,
+                total_new_minor=quote.total_new_minor,
+            )
+            continue
+        grouped[key] = TariffQuoteSummary(
+            tariff=current.tariff,
+            total_old_minor=current.total_old_minor + quote.total_old_minor,
+            total_new_minor=current.total_new_minor + quote.total_new_minor,
+        )
+
+    return sorted(grouped.values(), key=lambda item: (order.get(item.tariff.strip().lower(), 99), item.tariff))
 
 
 def _format_percent_text(value: str) -> str:

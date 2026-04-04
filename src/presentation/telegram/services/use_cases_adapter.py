@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
@@ -15,6 +16,7 @@ from src.application.dto.period_pick import PeriodPickDTO
 from src.application.dto.period_quote import PeriodQuote
 from src.application.use_cases.calculate_matches_for_all_guests import CalculateMatchesForAllGuests
 from src.application.use_cases.find_best_period_for_category import find_best_period_for_category
+from src.application.use_cases.find_best_periods_in_group import DEFAULT_LOYALTY_POLICY
 from src.application.use_cases.find_group_categories_for_guest import find_group_categories_for_guest
 from src.application.use_cases.get_admin_reports import GetAdminReports
 from src.application.use_cases.get_admin_statistics import GetAdminStatistics
@@ -22,7 +24,7 @@ from src.application.use_cases.get_best_periods_for_guest_in_group import GetBes
 from src.application.use_cases.get_period_quotes_from_matches_run import GetPeriodQuotesFromMatchesRun
 from src.application.use_cases.prepare_guest_notification_batches import PrepareGuestNotificationBatches
 from src.domain.entities.guest_preferences import GuestPreferences
-from src.domain.services.category_capacity import Occupancy
+from src.domain.services.category_capacity import Occupancy, can_fit
 from src.domain.services.date_price_selector import DatePriceSelector
 from src.domain.services.period_builder import PeriodBuilder
 from src.domain.services.pricing_service import PricingContext, PricingService
@@ -487,11 +489,19 @@ class TelegramBestPeriodsFacade(TelegramBaseFacade):
         if selected_pick is None:
             return None, []
 
-        _, quotes = TelegramPeriodQuotesFacade(ctx=self._ctx).get_period_quotes(
-            guest_id=guest_id,
-            period_start=selected_pick.start_date,
-            period_end=selected_pick.end_date_inclusive,
-            group_ids={group_id.strip().upper()},
+        quotes = _build_period_quotes_from_live_rates(
+            guest=guest,
+            rates=rates,
+            offers=offers,
+            group_rules=group_rules,
+            child_policies=child_policies,
+            query=GetPeriodQuotesQuery(
+                guest_id=guest_id,
+                period_start=selected_pick.start_date,
+                period_end=selected_pick.end_date_inclusive,
+                group_ids={group_id.strip().upper()},
+            ),
+            booking_date=today,
         )
         filtered_quotes = [quote for quote in quotes if quote.category_name == category_name]
         return selected_pick, filtered_quotes
@@ -512,6 +522,36 @@ class TelegramBestPeriodsFacade(TelegramBaseFacade):
             period_end=period_end,
             tariffs=tariffs,
         )
+
+    def get_available_dates_for_category(
+        self,
+        *,
+        guest_id: str,
+        group_id: str,
+        category_name: str,
+    ) -> list[date]:
+        guest = self._get_guest_profile(guest_id=guest_id)
+        if guest is None:
+            return []
+
+        today = date.today()
+        date_to = today + timedelta(days=self._ctx.matches_lookahead_days)
+        normalized_group_id = group_id.strip().upper()
+        normalized_category_name = category_name.strip()
+        allowed_groups = guest.effective_allowed_groups
+        group_rules = self._ctx.rules_repo.get_group_rules()
+
+        out = {
+            rate.date
+            for rate in self._ctx.rates_repo.get_daily_rates(today, date_to)
+            if rate.group_id.strip().upper() == normalized_group_id
+            and rate.category_id == normalized_category_name
+            and rate.adults_count == guest.occupancy.adults
+            and rate.is_available
+            and (allowed_groups is None or rate.group_id in allowed_groups)
+            and ((rule := group_rules.get(rate.group_id)) is None or can_fit(rule, guest.occupancy))
+        }
+        return sorted(out)
 
     def get_offer_text(self, *, offer_id: str | None, offer_title: str | None) -> str | None:
         return self._get_offer_text(offer_id=offer_id, offer_title=offer_title)
@@ -703,3 +743,196 @@ def _parse_percent(value: str | None) -> Decimal | None:
     if not cleaned:
         return None
     return (Decimal(cleaned) / Decimal("100")).quantize(Decimal("0.0001"))
+
+
+def _build_period_quotes_from_live_rates(
+    *,
+    guest: GuestPreferences,
+    rates,
+    offers,
+    group_rules,
+    child_policies,
+    query: GetPeriodQuotesQuery,
+    booking_date: date,
+) -> list[PeriodQuote]:
+    normalized_group_ids = (
+        {group_id.strip().upper() for group_id in query.group_ids}
+        if query.group_ids is not None
+        else None
+    )
+    allowed_groups = guest.effective_allowed_groups
+
+    filtered_rates = [
+        rate
+        for rate in rates
+        if query.period_start <= rate.date <= query.period_end
+        and rate.adults_count == guest.occupancy.adults
+        and rate.is_available
+        and (normalized_group_ids is None or rate.group_id.strip().upper() in normalized_group_ids)
+        and (allowed_groups is None or rate.group_id in allowed_groups)
+        and ((rule := group_rules.get(rate.group_id)) is None or can_fit(rule, guest.occupancy))
+    ]
+    if not filtered_rates:
+        return []
+
+    selector = DatePriceSelector(
+        pricing=PricingService(
+            loyalty_policy=DEFAULT_LOYALTY_POLICY,
+            group_rules=group_rules,
+            child_policy_by_group=child_policies,
+        )
+    )
+    ctx = PricingContext(
+        booking_date=booking_date,
+        loyalty_status=guest.loyalty_status,
+        bank_status=guest.bank_status,
+        children_4_13=guest.occupancy.children_4_13,
+    )
+    periods = PeriodBuilder.build(filtered_rates)
+    best_map = selector.best_prices_by_date(
+        daily_rates=filtered_rates,
+        periods=periods,
+        offers=offers,
+        ctx=ctx,
+    )
+
+    candidates = [
+        line
+        for line in best_map.values()
+        if query.period_start <= line.day <= query.period_end
+        and (normalized_group_ids is None or line.group_id.strip().upper() in normalized_group_ids)
+    ]
+    if not candidates:
+        return []
+
+    days_in_period = (query.period_end - query.period_start).days + 1
+    coverage: dict[tuple[str, str, str], set[date]] = defaultdict(set)
+    for line in candidates:
+        coverage[(line.category_id, line.group_id, line.tariff_code)].add(line.day)
+
+    valid_tariffs = {
+        key
+        for key, covered_days in coverage.items()
+        if len(covered_days) == days_in_period
+    }
+    if not valid_tariffs:
+        return []
+
+    grouped_lines: dict[tuple[str, str, str], list] = defaultdict(list)
+    for line in candidates:
+        key = (line.category_id, line.group_id, line.tariff_code)
+        if key in valid_tariffs:
+            grouped_lines[key].append(line)
+
+    quotes: list[PeriodQuote] = []
+    for (category_name, group_id, tariff), tariff_lines in grouped_lines.items():
+        ordered_lines = sorted(tariff_lines, key=lambda item: item.day)
+        segment_start = ordered_lines[0].day
+        segment_end = ordered_lines[0].day
+        total_old_minor = ordered_lines[0].old_price.amount_minor
+        total_new_minor = ordered_lines[0].new_price.amount_minor
+        segment_nights = 1
+        current_signature = _candidate_quote_signature(ordered_lines[0])
+
+        for line in ordered_lines[1:]:
+            line_signature = _candidate_quote_signature(line)
+            if line.day == segment_end + timedelta(days=1) and line_signature == current_signature:
+                segment_end = line.day
+                total_old_minor += line.old_price.amount_minor
+                total_new_minor += line.new_price.amount_minor
+                segment_nights += 1
+                continue
+
+            quotes.append(
+                _to_period_quote(
+                    category_name=category_name,
+                    group_id=group_id,
+                    tariff=tariff,
+                    query=query,
+                    segment_start=segment_start,
+                    segment_end=segment_end,
+                    total_old_minor=total_old_minor,
+                    total_new_minor=total_new_minor,
+                    nights=segment_nights,
+                    signature=current_signature,
+                )
+            )
+            segment_start = line.day
+            segment_end = line.day
+            total_old_minor = line.old_price.amount_minor
+            total_new_minor = line.new_price.amount_minor
+            segment_nights = 1
+            current_signature = line_signature
+
+        quotes.append(
+            _to_period_quote(
+                category_name=category_name,
+                group_id=group_id,
+                tariff=tariff,
+                query=query,
+                segment_start=segment_start,
+                segment_end=segment_end,
+                total_old_minor=total_old_minor,
+                total_new_minor=total_new_minor,
+                nights=segment_nights,
+                signature=current_signature,
+            )
+        )
+
+    quotes.sort(key=lambda item: (item.group_id, item.category_name, item.tariff, item.applied_from))
+    return quotes
+
+
+def _candidate_quote_signature(line) -> tuple:
+    return (
+        line.offer_id,
+        line.offer_title,
+        line.offer_repr,
+        line.loyalty_status,
+        line.loyalty_percent,
+        line.applied_bank_status.value if line.applied_bank_status is not None else None,
+        str(line.applied_bank_percent) if line.applied_bank_percent is not None else None,
+    )
+
+
+def _to_period_quote(
+    *,
+    category_name: str,
+    group_id: str,
+    tariff: str,
+    query: GetPeriodQuotesQuery,
+    segment_start: date,
+    segment_end: date,
+    total_old_minor: int,
+    total_new_minor: int,
+    nights: int,
+    signature: tuple,
+) -> PeriodQuote:
+    (
+        offer_id,
+        offer_title,
+        offer_repr,
+        loyalty_status,
+        loyalty_percent,
+        bank_status,
+        bank_percent,
+    ) = signature
+    return PeriodQuote(
+        category_name=category_name,
+        group_id=group_id,
+        tariff=tariff,
+        from_date=query.period_start,
+        to_date=query.period_end,
+        applied_from=segment_start,
+        applied_to=segment_end,
+        nights=nights,
+        total_old_minor=total_old_minor,
+        total_new_minor=total_new_minor,
+        offer_id=offer_id,
+        offer_title=offer_title,
+        offer_repr=offer_repr,
+        loyalty_status=loyalty_status,
+        loyalty_percent=loyalty_percent,
+        bank_status=bank_status,
+        bank_percent=bank_percent,
+    )

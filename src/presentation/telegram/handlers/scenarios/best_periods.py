@@ -367,6 +367,11 @@ class BestPeriodsScenario:
             category_name=category_names[category_idx],
             month_cursor=best_pick.start_date.replace(day=1),
             quote_group_ids=[draft.group_id],
+            available_dates=self._deps.best_periods.get_available_dates_for_category(
+                guest_id=guest_id,
+                group_id=draft.group_id,
+                category_name=category_names[category_idx],
+            ),
             source_group_id=draft.group_id,
             source_category_idx=category_idx,
         )

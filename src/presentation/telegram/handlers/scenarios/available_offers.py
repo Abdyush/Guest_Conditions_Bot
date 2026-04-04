@@ -9,6 +9,7 @@ from src.presentation.telegram.keyboards.available_offers import (
     build_available_groups_inline_keyboard,
     build_available_offer_text_inline_keyboard,
     build_available_period_details_inline_keyboard,
+    build_available_price_groups_inline_keyboard,
     build_available_periods_inline_keyboard,
     build_available_scenario_keyboard,
 )
@@ -29,6 +30,8 @@ from src.presentation.telegram.presenters.available_presenter import (
     build_available_breakfast_periods,
     build_available_groups,
     build_available_periods,
+    build_available_price_groups,
+    format_available_price_group_button_label,
     format_breakfast_period_button_label,
     format_period_button_label,
     render_available_categories_prompt,
@@ -36,6 +39,8 @@ from src.presentation.telegram.presenters.available_presenter import (
     render_available_groups_prompt,
     render_available_offer_text,
     render_available_period_details,
+    render_available_price_groups_prompt,
+    render_available_price_periods_prompt,
     render_available_periods_prompt,
 )
 from src.presentation.telegram.state.active_flow import ActiveFlow
@@ -144,14 +149,25 @@ class AvailableOffersScenario:
                 category_idx_raw=parts[3],
             )
             return
-        if len(parts) == 5 and parts[1] == "detail":
+        if len(parts) == 5 and parts[1] == "price":
+            await self._show_available_price_periods(
+                guest_id=guest_id,
+                telegram_user_id=telegram_user_id,
+                query=query,
+                group_idx_raw=parts[2],
+                category_idx_raw=parts[3],
+                price_idx_raw=parts[4],
+            )
+            return
+        if len(parts) == 6 and parts[1] == "detail":
             await self._show_available_period_details(
                 guest_id=guest_id,
                 telegram_user_id=telegram_user_id,
                 query=query,
                 group_idx_raw=parts[2],
                 category_idx_raw=parts[3],
-                period_idx_raw=parts[4],
+                price_idx_raw=parts[4],
+                period_idx_raw=parts[5],
             )
             return
 
@@ -167,14 +183,15 @@ class AvailableOffersScenario:
             return
 
         parts = data.split(":")
-        if len(parts) != 4:
+        if len(parts) != 5:
             await query.answer()
             return
 
-        group_idx, category_idx, period_idx = _parse_three_indices(parts[1], parts[2], parts[3])
-        if group_idx is None or category_idx is None or period_idx is None:
+        parsed = _parse_four_indices(parts[1], parts[2], parts[3], parts[4])
+        if parsed is None:
             await query.answer()
             return
+        group_idx, category_idx, price_idx, period_idx = parsed
 
         context = await self._resolve_available_context(
             guest_id=guest_id,
@@ -187,12 +204,13 @@ class AvailableOffersScenario:
             return
         category_name, rows = context
 
-        periods = build_available_periods(rows=rows)
-        if period_idx < 0 or period_idx >= len(periods):
+        detail_idx, _ = _resolve_available_period_selection(rows=rows, breakfast_period_idx=period_idx)
+        if detail_idx is None:
             await query.answer()
             return
 
-        period = periods[period_idx]
+        periods = build_available_periods(rows=rows)
+        period = periods[detail_idx]
         row_with_offer = next((x for x in period.rows if x.offer_id or x.offer_title), None)
         if row_with_offer is None:
             await query.answer("Текст специального предложения не найден.", show_alert=False)
@@ -212,6 +230,7 @@ class AvailableOffersScenario:
                 reply_markup=build_available_offer_text_inline_keyboard(
                     group_idx=group_idx,
                     category_idx=category_idx,
+                    price_idx=price_idx,
                     period_idx=period_idx,
                 ),
             )
@@ -458,24 +477,28 @@ class AvailableOffersScenario:
         category_name, rows = context
 
         periods = build_available_breakfast_periods(rows=rows)
+        price_groups = build_available_price_groups(periods=periods)
         session = await self._deps.sessions.get(telegram_user_id)
         session.interest_request = None
 
         await query.answer()
         if query.message is not None:
             await query.edit_message_text(
-                render_available_periods_prompt(category_name=category_name, periods=periods),
-                reply_markup=build_available_periods_inline_keyboard(
+                render_available_price_groups_prompt(category_name=category_name, groups=price_groups),
+                reply_markup=build_available_price_groups_inline_keyboard(
                     group_idx=group_idx,
                     category_idx=category_idx,
-                    periods=[
-                        format_breakfast_period_button_label(start=p.display_start, end=p.end, price_minor=p.button_price_minor)
-                        for p in periods
+                    prices=[
+                        format_available_price_group_button_label(
+                            price_minor=group.price_minor,
+                            periods_count=len(group.period_indices),
+                        )
+                        for group in price_groups
                     ],
                 ),
             )
 
-    async def _show_available_period_details(
+    async def _show_available_price_periods(
         self,
         *,
         guest_id: str,
@@ -483,14 +506,13 @@ class AvailableOffersScenario:
         query,
         group_idx_raw: str,
         category_idx_raw: str,
-        period_idx_raw: str,
-        preserve_request: bool = False,
+        price_idx_raw: str,
     ) -> None:
-        parsed = _parse_three_indices(group_idx_raw, category_idx_raw, period_idx_raw)
+        parsed = _parse_three_indices(group_idx_raw, category_idx_raw, price_idx_raw)
         if parsed is None:
             await query.answer()
             return
-        group_idx, category_idx, period_idx = parsed
+        group_idx, category_idx, price_idx = parsed
 
         context = await self._resolve_available_context(
             guest_id=guest_id,
@@ -503,15 +525,90 @@ class AvailableOffersScenario:
             return
         category_name, rows = context
 
-        periods = build_available_periods(rows=rows)
-        if period_idx < 0 or period_idx >= len(periods):
+        periods = build_available_breakfast_periods(rows=rows)
+        price_groups = build_available_price_groups(periods=periods)
+        if price_idx < 0 or price_idx >= len(price_groups):
             await query.answer()
             return
 
+        selected_group = price_groups[price_idx]
+        selected_periods = [
+            (price_idx, period_idx, periods[period_idx])
+            for period_idx in selected_group.period_indices
+            if 0 <= period_idx < len(periods)
+        ]
+
+        await query.answer()
+        if query.message is not None:
+            await query.edit_message_text(
+                render_available_price_periods_prompt(
+                    category_name=category_name,
+                    price_minor=selected_group.price_minor,
+                    periods=[period for _, _, period in selected_periods],
+                ),
+                reply_markup=build_available_periods_inline_keyboard(
+                    group_idx=group_idx,
+                    category_idx=category_idx,
+                    periods=[
+                        (
+                            current_price_idx,
+                            period_idx,
+                            format_breakfast_period_button_label(
+                                start=period.display_start,
+                                end=period.end,
+                                price_minor=period.button_price_minor,
+                            ),
+                        )
+                        for current_price_idx, period_idx, period in selected_periods
+                    ],
+                ),
+            )
+
+    async def _show_available_period_details(
+        self,
+        *,
+        guest_id: str,
+        telegram_user_id: int,
+        query,
+        group_idx_raw: str,
+        category_idx_raw: str,
+        price_idx_raw: str,
+        period_idx_raw: str,
+        preserve_request: bool = False,
+    ) -> None:
+        parsed = _parse_four_indices(group_idx_raw, category_idx_raw, price_idx_raw, period_idx_raw)
+        if parsed is None:
+            await query.answer()
+            return
+        group_idx, category_idx, price_idx, period_idx = parsed
+
+        context = await self._resolve_available_context(
+            guest_id=guest_id,
+            telegram_user_id=telegram_user_id,
+            group_idx=group_idx,
+            category_idx=category_idx,
+        )
+        if context is None:
+            await query.answer()
+            return
+        category_name, rows = context
+
+        breakfast_periods = build_available_breakfast_periods(rows=rows)
+        if period_idx < 0 or period_idx >= len(breakfast_periods):
+            await query.answer()
+            return
+        detail_idx, resolved_price_idx = _resolve_available_period_selection(rows=rows, breakfast_period_idx=period_idx)
+        if detail_idx is None:
+            await query.answer()
+            return
+        if price_idx < 0 or resolved_price_idx != price_idx:
+            price_idx = resolved_price_idx
+
+        periods = build_available_periods(rows=rows)
         session = await self._deps.sessions.get(telegram_user_id)
         if not preserve_request:
             session.interest_request = None
-        period = periods[period_idx]
+        period = periods[detail_idx]
         last_room_dates = self._deps.available_offers.get_last_room_dates(
             guest_id=guest_id,
             category_name=category_name,
@@ -528,6 +625,7 @@ class AvailableOffersScenario:
                 reply_markup=build_available_period_details_inline_keyboard(
                     group_idx=group_idx,
                     category_idx=category_idx,
+                    price_idx=price_idx,
                     period_idx=period_idx,
                     has_offer_text=has_offer,
                 ),
@@ -558,6 +656,7 @@ class AvailableOffersScenario:
             query=query,
             group_idx_raw=str(draft.source_group_idx),
             category_idx_raw=str(draft.source_category_idx),
+            price_idx_raw="-1",
             period_idx_raw=str(draft.source_period_idx),
             preserve_request=True,
         )
@@ -611,11 +710,12 @@ class AvailableOffersScenario:
             return None
         category_name, rows = context
 
-        periods = build_available_periods(rows=rows)
-        if period_idx < 0 or period_idx >= len(periods):
+        detail_idx, _ = _resolve_available_period_selection(rows=rows, breakfast_period_idx=period_idx)
+        if detail_idx is None:
             return None
 
-        source_period = periods[period_idx]
+        periods = build_available_periods(rows=rows)
+        source_period = periods[detail_idx]
         group_ids = sorted({row.group_id for row in rows if getattr(row, "group_id", None)})
         return InterestRequestStartContext(
             period_mode="select",
@@ -623,6 +723,7 @@ class AvailableOffersScenario:
             category_name=category_name,
             month_cursor=source_period.display_start.replace(day=1),
             quote_group_ids=group_ids,
+            available_dates=_available_interest_dates(rows=rows),
             source_group_idx=group_idx,
             source_category_idx=category_idx,
             source_period_idx=period_idx,
@@ -679,6 +780,43 @@ def _parse_three_indices(first: str, second: str, third: str) -> tuple[int, int,
         return int(first), int(second), int(third)
     except ValueError:
         return None
+
+
+def _parse_four_indices(first: str, second: str, third: str, fourth: str) -> tuple[int, int, int, int] | None:
+    try:
+        return int(first), int(second), int(third), int(fourth)
+    except ValueError:
+        return None
+
+
+def _resolve_available_period_selection(*, rows: list, breakfast_period_idx: int) -> tuple[int | None, int]:
+    breakfast_periods = build_available_breakfast_periods(rows=rows)
+    if breakfast_period_idx < 0 or breakfast_period_idx >= len(breakfast_periods):
+        return None, -1
+
+    price_groups = build_available_price_groups(periods=breakfast_periods)
+    resolved_price_idx = next(
+        (idx for idx, group in enumerate(price_groups) if breakfast_period_idx in group.period_indices),
+        -1,
+    )
+
+    breakfast_period = breakfast_periods[breakfast_period_idx]
+    period_key = (breakfast_period.start, breakfast_period.end)
+    for detail_idx, period in enumerate(build_available_periods(rows=rows)):
+        if (period.start, period.end) == period_key:
+            return detail_idx, resolved_price_idx
+    return None, resolved_price_idx
+
+
+def _available_interest_dates(*, rows: list) -> list[date]:
+    out: set[date] = set()
+    for row in rows:
+        current = row.date
+        row_end = row.period_end or row.date
+        while current <= row_end:
+            out.add(current)
+            current = date.fromordinal(current.toordinal() + 1)
+    return sorted(out)
 
 
 class _AvailableInterestRequestAdapter:

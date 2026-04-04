@@ -37,6 +37,12 @@ class AvailableBreakfastPeriod:
     rows: list[MatchedDateRecord]
 
 
+@dataclass(frozen=True, slots=True)
+class AvailablePriceGroup:
+    price_minor: int
+    period_indices: list[int]
+
+
 def build_available_groups(*, category_groups: list[tuple[str, str]]) -> list[AvailableCategoryGroup]:
     grouped: dict[str, set[str]] = {}
     for category_name, group_id in category_groups:
@@ -64,6 +70,23 @@ def render_available_periods_prompt(*, category_name: str, periods: list[Availab
     if not periods:
         return f"{category_name}\n\nВыберите период проживания.\nНет доступных периодов."
     return f"{category_name}\n\nВыберите период проживания."
+
+
+def render_available_price_groups_prompt(*, category_name: str, groups: list[AvailablePriceGroup]) -> str:
+    if not groups:
+        return f"{category_name}\n\nВыберите стоимость проживания.\nНет доступных периодов."
+    return f"{category_name}\n\nВыберите стоимость проживания."
+
+
+def render_available_price_periods_prompt(
+    *,
+    category_name: str,
+    price_minor: int,
+    periods: list[AvailableBreakfastPeriod],
+) -> str:
+    if not periods:
+        return f"{category_name}\n\nДля цены {format_rub(price_minor)}/сутки нет доступных периодов."
+    return f"{category_name}\n\nЦена: {format_rub(price_minor)}/сутки\nВыберите период проживания."
 
 
 def render_available_period_details(*, category_name: str, period: AvailablePeriod, last_room_dates: list[date]) -> str:
@@ -240,12 +263,40 @@ def build_available_breakfast_periods(*, rows: list[MatchedDateRecord]) -> list[
     return periods
 
 
+def build_available_price_groups(*, periods: list[AvailableBreakfastPeriod]) -> list[AvailablePriceGroup]:
+    grouped: dict[int, list[int]] = {}
+    for idx, period in enumerate(periods):
+        grouped.setdefault(period.button_price_minor, []).append(idx)
+
+    out = [
+        AvailablePriceGroup(price_minor=price_minor, period_indices=period_indices)
+        for price_minor, period_indices in grouped.items()
+    ]
+    out.sort(
+        key=lambda item: (
+            item.price_minor,
+            periods[item.period_indices[0]].display_start if item.period_indices else date.max,
+        )
+    )
+    return out
+
+
 def format_period_button_label(*, start: date, end: date, price_minor: int) -> str:
     return f"{format_booking_period(start_date=start, end_date_inclusive=end, separator=' - ')}, {minor_to_rub(price_minor):.2f} рублей в сутки"
 
 
 def format_breakfast_period_button_label(*, start: date, end: date, price_minor: int) -> str:
     return f"{format_booking_period(start_date=start, end_date_inclusive=end, separator='–')} • {format_rub(price_minor)}/сутки"
+
+
+def format_available_price_group_button_label(*, price_minor: int, periods_count: int) -> str:
+    if periods_count % 10 == 1 and periods_count % 100 != 11:
+        suffix = "период"
+    elif periods_count % 10 in {2, 3, 4} and periods_count % 100 not in {12, 13, 14}:
+        suffix = "периода"
+    else:
+        suffix = "периодов"
+    return f"{format_rub(price_minor)}/сутки • {periods_count} {suffix}"
 
 
 def format_date(value: date) -> str:

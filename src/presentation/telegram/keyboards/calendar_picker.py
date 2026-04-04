@@ -39,6 +39,7 @@ def build_period_calendar_keyboard(
     month_cursor: date,
     checkin: date | None,
     checkout: date | None,
+    available_dates: set[date] | None = None,
     callback_prefix: str = "cal",
 ) -> InlineKeyboardMarkup:
     today = date.today()
@@ -56,7 +57,11 @@ def build_period_calendar_keyboard(
     for week in cal.monthdatescalendar(month_cursor.year, month_cursor.month):
         row: list[InlineKeyboardButton] = []
         for day_date in week:
-            if day_date.month != month_cursor.month or day_date < today:
+            if (
+                day_date.month != month_cursor.month
+                or day_date < today
+                or (available_dates is not None and day_date not in available_dates)
+            ):
                 row.append(InlineKeyboardButton(text=_render_disabled_day_text(day_date), callback_data=noop_data))
                 continue
             row.append(

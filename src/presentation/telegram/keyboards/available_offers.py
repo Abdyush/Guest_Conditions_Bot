@@ -28,11 +28,19 @@ def build_available_categories_inline_keyboard(*, group_idx: int, category_names
 
 
 
-def build_available_periods_inline_keyboard(*, group_idx: int, category_idx: int, periods: list[str]) -> InlineKeyboardMarkup:
+def build_available_price_groups_inline_keyboard(*, group_idx: int, category_idx: int, prices: list[str]) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
-    for idx, label in enumerate(periods):
-        rows.append([InlineKeyboardButton(text=label, callback_data=f"availprd:detail:{group_idx}:{category_idx}:{idx}")])
+    for idx, label in enumerate(prices):
+        rows.append([InlineKeyboardButton(text=label, callback_data=f"availprd:price:{group_idx}:{category_idx}:{idx}")])
     rows.append([InlineKeyboardButton(text="Назад к категориям", callback_data=f"availcat:grp:{group_idx}")])
+    return InlineKeyboardMarkup(rows)
+
+
+def build_available_periods_inline_keyboard(*, group_idx: int, category_idx: int, periods: list[tuple[int, int, str]]) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    for price_idx, period_idx, label in periods:
+        rows.append([InlineKeyboardButton(text=label, callback_data=f"availprd:detail:{group_idx}:{category_idx}:{price_idx}:{period_idx}")])
+    rows.append([InlineKeyboardButton(text="Назад к суммам", callback_data=f"availprd:list:{group_idx}:{category_idx}")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -41,6 +49,7 @@ def build_available_period_details_inline_keyboard(
     *,
     group_idx: int,
     category_idx: int,
+    price_idx: int,
     period_idx: int,
     has_offer_text: bool,
 ) -> InlineKeyboardMarkup:
@@ -48,16 +57,16 @@ def build_available_period_details_inline_keyboard(
         [InlineKeyboardButton(text="Заинтересовало", callback_data=f"avreq:start:available:{group_idx}:{category_idx}:{period_idx}")]
     ]
     if has_offer_text:
-        rows.append([InlineKeyboardButton(text="Текст специального предложения", callback_data=f"avoff:{group_idx}:{category_idx}:{period_idx}")])
-    rows.append([InlineKeyboardButton(text="Назад к периодам", callback_data=f"availprd:list:{group_idx}:{category_idx}")])
+        rows.append([InlineKeyboardButton(text="Текст специального предложения", callback_data=f"avoff:{group_idx}:{category_idx}:{price_idx}:{period_idx}")])
+    rows.append([InlineKeyboardButton(text="Назад к периодам", callback_data=f"availprd:price:{group_idx}:{category_idx}:{price_idx}")])
     return InlineKeyboardMarkup(rows)
 
 
 
-def build_available_offer_text_inline_keyboard(*, group_idx: int, category_idx: int, period_idx: int) -> InlineKeyboardMarkup:
+def build_available_offer_text_inline_keyboard(*, group_idx: int, category_idx: int, price_idx: int, period_idx: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
-            [InlineKeyboardButton(text="Назад к предложению", callback_data=f"availprd:detail:{group_idx}:{category_idx}:{period_idx}")],
+            [InlineKeyboardButton(text="Назад к предложению", callback_data=f"availprd:detail:{group_idx}:{category_idx}:{price_idx}:{period_idx}")],
         ]
     )
 
@@ -68,12 +77,14 @@ def build_available_request_calendar_inline_keyboard(
     month_cursor,
     checkin,
     checkout,
+    available_dates=None,
     group_idx: int,
 ) -> InlineKeyboardMarkup:
     return build_interest_request_calendar_inline_keyboard(
         month_cursor=month_cursor,
         checkin=checkin,
         checkout=checkout,
+        available_dates=available_dates,
         parent_back_text="Назад к категориям",
     )
 

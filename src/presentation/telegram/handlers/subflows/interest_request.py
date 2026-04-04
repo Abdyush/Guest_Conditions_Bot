@@ -32,6 +32,7 @@ class InterestRequestStartContext:
     checkin: date | None = None
     checkout: date | None = None
     quote_group_ids: list[str] | None = None
+    available_dates: list[date] | None = None
     source_group_id: str | None = None
     source_group_idx: int | None = None
     source_category_idx: int | None = None
@@ -150,6 +151,7 @@ class InterestRequestSubflow:
             month_cursor=start_context.month_cursor,
             checkin=start_context.checkin,
             checkout=start_context.checkout,
+            available_dates=list(start_context.available_dates) if start_context.available_dates is not None else None,
             tariff=None,
             sent_to_admin=False,
         )
@@ -163,6 +165,7 @@ class InterestRequestSubflow:
         if draft is None or draft.month_cursor is None:
             await query.answer()
             return
+        available_dates = set(draft.available_dates or [])
         today = date.today()
         min_month_cursor = today.replace(day=1)
 
@@ -183,6 +186,7 @@ class InterestRequestSubflow:
                         month_cursor=draft.month_cursor,
                         checkin=draft.checkin,
                         checkout=draft.checkout,
+                        available_dates=available_dates,
                         parent_back_text=self._adapter.calendar_parent_back_text,
                     )
                 )
@@ -196,15 +200,16 @@ class InterestRequestSubflow:
         except ValueError:
             await query.answer()
             return
-        if picked < today:
+        if picked < today or (available_dates and picked not in available_dates):
             draft.month_cursor = min_month_cursor
-            await query.answer("Нельзя выбрать прошедшую дату", show_alert=False)
+            await query.answer("Эта дата недоступна для выбранной категории", show_alert=False)
             if query.message is not None:
                 await query.edit_message_reply_markup(
                     reply_markup=build_interest_request_calendar_inline_keyboard(
                         month_cursor=draft.month_cursor,
                         checkin=draft.checkin,
                         checkout=draft.checkout,
+                        available_dates=available_dates,
                         parent_back_text=self._adapter.calendar_parent_back_text,
                     )
                 )
@@ -221,6 +226,7 @@ class InterestRequestSubflow:
                         month_cursor=draft.month_cursor,
                         checkin=draft.checkin,
                         checkout=draft.checkout,
+                        available_dates=available_dates,
                         parent_back_text=self._adapter.calendar_parent_back_text,
                     )
                 )
@@ -233,13 +239,14 @@ class InterestRequestSubflow:
                 await query.answer()
                 if query.message is not None:
                     await query.edit_message_reply_markup(
-                        reply_markup=build_interest_request_calendar_inline_keyboard(
-                            month_cursor=draft.month_cursor,
-                            checkin=draft.checkin,
-                            checkout=draft.checkout,
-                            parent_back_text=self._adapter.calendar_parent_back_text,
-                        )
+                    reply_markup=build_interest_request_calendar_inline_keyboard(
+                        month_cursor=draft.month_cursor,
+                        checkin=draft.checkin,
+                        checkout=draft.checkout,
+                        available_dates=available_dates,
+                        parent_back_text=self._adapter.calendar_parent_back_text,
                     )
+                )
                 return
 
             if picked < draft.checkin:
@@ -253,6 +260,25 @@ class InterestRequestSubflow:
                             month_cursor=draft.month_cursor,
                             checkin=draft.checkin,
                             checkout=None,
+                            available_dates=available_dates,
+                            parent_back_text=self._adapter.calendar_parent_back_text,
+                        )
+                    )
+                return
+
+            if available_dates and not _is_contiguous_available_range(
+                start=draft.checkin,
+                end=picked,
+                available_dates=available_dates,
+            ):
+                await query.answer("В выбранном диапазоне есть недоступные даты", show_alert=False)
+                if query.message is not None:
+                    await query.edit_message_reply_markup(
+                        reply_markup=build_interest_request_calendar_inline_keyboard(
+                            month_cursor=draft.month_cursor,
+                            checkin=draft.checkin,
+                            checkout=draft.checkout,
+                            available_dates=available_dates,
                             parent_back_text=self._adapter.calendar_parent_back_text,
                         )
                     )
@@ -327,6 +353,7 @@ class InterestRequestSubflow:
                     month_cursor=draft.month_cursor,
                     checkin=draft.checkin,
                     checkout=draft.checkout,
+                    available_dates=set(draft.available_dates or []),
                     parent_back_text=self._adapter.calendar_parent_back_text,
                 ),
             )
@@ -393,9 +420,44 @@ class InterestRequestSubflow:
             seen_offers.add(offer_key)
             special_offers.append(offer_key)
 
-        return open_price_minor, preliminary_price_minor, loyalty_status, special_offers
+        return open_price_minor, preliminary_price_minor, loyalty_status, _merge_adjacent_special_offers(special_offers)
 
-    def _responsible_contact_url(self) -> str | None:
+def _responsible_contact_url(self) -> str | None:
         if self._deps.admin_telegram_id is None:
             return None
         return f"tg://user?id={self._deps.admin_telegram_id}"
+
+
+def _is_contiguous_available_range(*, start: date, end: date, available_dates: set[date]) -> bool:
+    current = start
+    while current <= end:
+        if current not in available_dates:
+            return False
+        current = date.fromordinal(current.toordinal() + 1)
+    return True
+
+
+def _merge_adjacent_special_offers(
+    special_offers: list[tuple[date, date, str]],
+) -> list[tuple[date, date, str]]:
+    if not special_offers:
+        return []
+
+    ordered = sorted(special_offers, key=lambda item: (item[2], item[0], item[1]))
+    merged: list[tuple[date, date, str]] = []
+
+    current_start, current_end, current_title = ordered[0]
+    for offer_start, offer_end, offer_title in ordered[1:]:
+        if (
+            offer_title == current_title
+            and offer_start <= date.fromordinal(current_end.toordinal() + 1)
+        ):
+            if offer_end > current_end:
+                current_end = offer_end
+            continue
+
+        merged.append((current_start, current_end, current_title))
+        current_start, current_end, current_title = offer_start, offer_end, offer_title
+
+    merged.append((current_start, current_end, current_title))
+    return merged

@@ -58,6 +58,7 @@ class InterestRequestDraft:
     month_cursor: date | None = None
     checkin: date | None = None
     checkout: date | None = None
+    available_dates: list[date] | None = None
     tariff: str | None = None
     sent_to_admin: bool = False
 
@@ -266,6 +267,7 @@ class InMemorySessionStore:
             "month_cursor": draft.month_cursor.isoformat() if draft.month_cursor else None,
             "checkin": draft.checkin.isoformat() if draft.checkin else None,
             "checkout": draft.checkout.isoformat() if draft.checkout else None,
+            "available_dates": [value.isoformat() for value in draft.available_dates] if draft.available_dates is not None else None,
             "tariff": draft.tariff,
             "sent_to_admin": draft.sent_to_admin,
         }
@@ -286,6 +288,9 @@ class InMemorySessionStore:
             month_cursor=date.fromisoformat(payload["month_cursor"]) if payload.get("month_cursor") else None,
             checkin=date.fromisoformat(payload["checkin"]) if payload.get("checkin") else None,
             checkout=date.fromisoformat(payload["checkout"]) if payload.get("checkout") else None,
+            available_dates=[date.fromisoformat(value) for value in payload.get("available_dates", [])]
+            if payload.get("available_dates") is not None
+            else None,
             tariff=payload.get("tariff"),
             sent_to_admin=bool(payload.get("sent_to_admin", False)),
         )
