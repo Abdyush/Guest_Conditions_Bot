@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 from datetime import date, timedelta
 
-from selenium.common.exceptions import NoSuchElementException
+from selenium.common.exceptions import NoSuchElementException, TimeoutException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.support import expected_conditions as EC
@@ -68,9 +68,9 @@ class SeleniumHotelRatesGateway:
         if len(iframes) < 2:
             raise RuntimeError("Booking iframe not found")
 
-        self._browser.switch_to.frame(iframes[1])  
-        container = self._wait.until(EC.presence_of_element_located((By.CLASS_NAME, "page-container")))  
-        
+        self._browser.switch_to.frame(iframes[1])
+        container = self._wait.until(EC.presence_of_element_located((By.CLASS_NAME, "page-container")))
+
         select_adults = container.find_element(By.CLASS_NAME, "x-select__match-icon")
         select_adults.click()
         time.sleep(4)
@@ -85,7 +85,7 @@ class SeleniumHotelRatesGateway:
             time.sleep(1)
         else:
             raise RuntimeError(f"Option with {self._adults_count} adults not found")
-        
+
         buttons = container.find_elements(By.TAG_NAME, "span")
         search_button = next((el for el in buttons if el.text.strip() == "Найти"), None)
         if search_button is None:
@@ -117,20 +117,45 @@ class SeleniumHotelRatesGateway:
         self._browser.execute_script("arguments[0].scrollIntoView({block: 'center'});", checkout_btn)
         self._wait.until(EC.element_to_be_clickable(checkout_btn)).click()
 
-    def _find_categories(self) -> list:
+    def _find_select_buttons(self) -> list:
+        return [
+            x
+            for x in self._browser.find_elements(By.CLASS_NAME, "tl-btn")
+            if x.text.strip() == "Выбрать"
+        ]
+
+    def _wait_for_categories_state(self) -> bool:
+        banner_selector = "[tl-message*='closest_available_dates']"
+
+        def categories_state_ready(_browser) -> bool:
+            if self._browser.find_elements(By.CSS_SELECTOR, banner_selector):
+                return True
+            return bool(self._find_select_buttons())
+
         try:
-            self._browser.find_element(By.CSS_SELECTOR,
-                                        "[tl-message*='closest_available_dates']")
+            self._wait.until(categories_state_ready)
+        except TimeoutException:
+            return False
+        return True
+
+    def _find_categories(self) -> list:
+        banner_selector = "[tl-message*='closest_available_dates']"
+        try:
+            self._browser.find_element(By.CSS_SELECTOR, banner_selector)
             return []
         except NoSuchElementException:
+            if not self._wait_for_categories_state():
+                raise RuntimeError("Timed out waiting for categories list or empty-state banner")
+            if self._browser.find_elements(By.CSS_SELECTOR, banner_selector):
+                return []
+
             selected_buttons = []
             while True:
                 start = len(selected_buttons)
-                tmp = [
-                    x
-                    for x in self._browser.find_elements(By.CLASS_NAME, "tl-btn")
-                    if x.text.strip() == "Выбрать"
-                ]
+                tmp = self._find_select_buttons()
+                if not tmp:
+                    time.sleep(5)
+                    tmp = self._find_select_buttons()
                 if not tmp:
                     raise RuntimeError("Category buttons with text 'Выбрать' not found on page")
                 selected_buttons = list(set(selected_buttons).union(set(tmp)))
