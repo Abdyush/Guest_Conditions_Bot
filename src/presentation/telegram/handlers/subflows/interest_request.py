@@ -36,6 +36,7 @@ class InterestRequestStartContext:
     source_group_id: str | None = None
     source_group_idx: int | None = None
     source_category_idx: int | None = None
+    source_price_idx: int | None = None
     source_period_idx: int | None = None
 
 
@@ -146,6 +147,7 @@ class InterestRequestSubflow:
             source_group_id=start_context.source_group_id,
             source_group_idx=start_context.source_group_idx,
             source_category_idx=start_context.source_category_idx,
+            source_price_idx=start_context.source_price_idx,
             source_period_idx=start_context.source_period_idx,
             quote_group_ids=list(start_context.quote_group_ids) if start_context.quote_group_ids is not None else None,
             month_cursor=start_context.month_cursor,

@@ -53,6 +53,7 @@ class InterestRequestDraft:
     source_group_id: str | None = None
     source_group_idx: int | None = None
     source_category_idx: int | None = None
+    source_price_idx: int | None = None
     source_period_idx: int | None = None
     quote_group_ids: list[str] | None = None
     month_cursor: date | None = None
@@ -262,6 +263,7 @@ class InMemorySessionStore:
             "source_group_id": draft.source_group_id,
             "source_group_idx": draft.source_group_idx,
             "source_category_idx": draft.source_category_idx,
+            "source_price_idx": draft.source_price_idx,
             "source_period_idx": draft.source_period_idx,
             "quote_group_ids": list(draft.quote_group_ids) if draft.quote_group_ids is not None else None,
             "month_cursor": draft.month_cursor.isoformat() if draft.month_cursor else None,
@@ -283,6 +285,7 @@ class InMemorySessionStore:
             source_group_id=payload.get("source_group_id"),
             source_group_idx=payload.get("source_group_idx", payload.get("group_idx")),
             source_category_idx=payload.get("source_category_idx", payload.get("category_idx")),
+            source_price_idx=payload.get("source_price_idx"),
             source_period_idx=payload.get("source_period_idx"),
             quote_group_ids=list(payload["quote_group_ids"]) if payload.get("quote_group_ids") is not None else None,
             month_cursor=date.fromisoformat(payload["month_cursor"]) if payload.get("month_cursor") else None,

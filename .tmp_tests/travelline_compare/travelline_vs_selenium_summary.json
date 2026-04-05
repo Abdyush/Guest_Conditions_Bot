@@ -1,0 +1,18 @@
+{
+  "date_from": "2026-04-10",
+  "date_to": "2026-04-10",
+  "adults_counts": [
+    2
+  ],
+  "selenium_total_rows": 1,
+  "travelline_total_rows": 2,
+  "selenium_only_rows": 0,
+  "travelline_only_rows": 1,
+  "exact_price_matches": 1,
+  "price_mismatches": 0,
+  "unmapped_categories": 0,
+  "tariff_pairing_anomalies": 0,
+  "duplicates_removed": 1,
+  "summary_path": ".tmp_tests\\travelline_compare\\travelline_vs_selenium_summary.json",
+  "diff_path": ".tmp_tests\\travelline_compare\\travelline_vs_selenium_diff.csv"
+}

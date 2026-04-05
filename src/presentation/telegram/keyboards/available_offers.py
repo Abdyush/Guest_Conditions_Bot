@@ -54,7 +54,7 @@ def build_available_period_details_inline_keyboard(
     has_offer_text: bool,
 ) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = [
-        [InlineKeyboardButton(text="Заинтересовало", callback_data=f"avreq:start:available:{group_idx}:{category_idx}:{period_idx}")]
+        [InlineKeyboardButton(text="Заинтересовало", callback_data=f"avreq:start:available:{group_idx}:{category_idx}:{price_idx}:{period_idx}")]
     ]
     if has_offer_text:
         rows.append([InlineKeyboardButton(text="Текст специального предложения", callback_data=f"avoff:{group_idx}:{category_idx}:{price_idx}:{period_idx}")])

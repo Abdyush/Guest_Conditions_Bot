@@ -1,0 +1,3 @@
+status,date,adults_count,category_id,group_id,tariff_code,selenium_amount_minor,travelline_amount_minor,note
+match,2026-04-10,2,Deluxe Mountain View,DELUXE,breakfast,1200000,1200000,
+travelline_only,2026-04-10,2,Deluxe Mountain View,DELUXE,fullpansion,,1500000,

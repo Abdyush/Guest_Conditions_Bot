@@ -27,6 +27,7 @@ from src.presentation.telegram.keyboards.main_menu import (
     build_phone_request_keyboard,
 )
 from src.presentation.telegram.presenters.available_presenter import (
+    AvailablePeriod,
     build_available_breakfast_periods,
     build_available_groups,
     build_available_periods,
@@ -532,11 +533,7 @@ class AvailableOffersScenario:
             return
 
         selected_group = price_groups[price_idx]
-        selected_periods = [
-            (price_idx, period_idx, periods[period_idx])
-            for period_idx in selected_group.period_indices
-            if 0 <= period_idx < len(periods)
-        ]
+        merged_periods = _build_merged_available_price_periods(rows=rows, price_idx=price_idx)
 
         await query.answer()
         if query.message is not None:
@@ -544,22 +541,22 @@ class AvailableOffersScenario:
                 render_available_price_periods_prompt(
                     category_name=category_name,
                     price_minor=selected_group.price_minor,
-                    periods=[period for _, _, period in selected_periods],
+                    periods=merged_periods,
                 ),
                 reply_markup=build_available_periods_inline_keyboard(
                     group_idx=group_idx,
                     category_idx=category_idx,
                     periods=[
                         (
-                            current_price_idx,
-                            period_idx,
+                            price_idx,
+                            merged_idx,
                             format_breakfast_period_button_label(
                                 start=period.display_start,
                                 end=period.end,
                                 price_minor=period.button_price_minor,
                             ),
                         )
-                        for current_price_idx, period_idx, period in selected_periods
+                        for merged_idx, period in enumerate(merged_periods)
                     ],
                 ),
             )
@@ -593,22 +590,14 @@ class AvailableOffersScenario:
             return
         category_name, rows = context
 
-        breakfast_periods = build_available_breakfast_periods(rows=rows)
-        if period_idx < 0 or period_idx >= len(breakfast_periods):
+        merged_periods = _build_merged_available_price_periods(rows=rows, price_idx=price_idx)
+        if period_idx < 0 or period_idx >= len(merged_periods):
             await query.answer()
             return
-        detail_idx, resolved_price_idx = _resolve_available_period_selection(rows=rows, breakfast_period_idx=period_idx)
-        if detail_idx is None:
-            await query.answer()
-            return
-        if price_idx < 0 or resolved_price_idx != price_idx:
-            price_idx = resolved_price_idx
-
-        periods = build_available_periods(rows=rows)
+        period = merged_periods[period_idx]
         session = await self._deps.sessions.get(telegram_user_id)
         if not preserve_request:
             session.interest_request = None
-        period = periods[detail_idx]
         last_room_dates = self._deps.available_offers.get_last_room_dates(
             guest_id=guest_id,
             category_name=category_name,
@@ -646,6 +635,7 @@ class AvailableOffersScenario:
             draft is None
             or draft.source_group_idx is None
             or draft.source_category_idx is None
+            or draft.source_price_idx is None
             or draft.source_period_idx is None
         ):
             await query.answer()
@@ -656,7 +646,7 @@ class AvailableOffersScenario:
             query=query,
             group_idx_raw=str(draft.source_group_idx),
             category_idx_raw=str(draft.source_category_idx),
-            price_idx_raw="-1",
+            price_idx_raw=str(draft.source_price_idx),
             period_idx_raw=str(draft.source_period_idx),
             preserve_request=True,
         )
@@ -692,13 +682,13 @@ class AvailableOffersScenario:
         data: str,
     ) -> InterestRequestStartContext | None:
         parts = data.split(":")
-        if len(parts) != 6 or parts[2] != "available":
+        if len(parts) != 7 or parts[2] != "available":
             return None
 
-        parsed = _parse_three_indices(parts[3], parts[4], parts[5])
+        parsed = _parse_four_indices(parts[3], parts[4], parts[5], parts[6])
         if parsed is None:
             return None
-        group_idx, category_idx, period_idx = parsed
+        group_idx, category_idx, price_idx, period_idx = parsed
 
         context = await self._resolve_available_context(
             guest_id=guest_id,
@@ -710,12 +700,11 @@ class AvailableOffersScenario:
             return None
         category_name, rows = context
 
-        detail_idx, _ = _resolve_available_period_selection(rows=rows, breakfast_period_idx=period_idx)
-        if detail_idx is None:
+        merged_periods = _build_merged_available_price_periods(rows=rows, price_idx=price_idx)
+        if period_idx < 0 or period_idx >= len(merged_periods):
             return None
 
-        periods = build_available_periods(rows=rows)
-        source_period = periods[detail_idx]
+        source_period = merged_periods[period_idx]
         group_ids = sorted({row.group_id for row in rows if getattr(row, "group_id", None)})
         return InterestRequestStartContext(
             period_mode="select",
@@ -726,6 +715,7 @@ class AvailableOffersScenario:
             available_dates=_available_interest_dates(rows=rows),
             source_group_idx=group_idx,
             source_category_idx=category_idx,
+            source_price_idx=price_idx,
             source_period_idx=period_idx,
         )
 
@@ -806,6 +796,61 @@ def _resolve_available_period_selection(*, rows: list, breakfast_period_idx: int
         if (period.start, period.end) == period_key:
             return detail_idx, resolved_price_idx
     return None, resolved_price_idx
+
+
+def _build_merged_available_price_periods(*, rows: list, price_idx: int) -> list[AvailablePeriod]:
+    breakfast_periods = build_available_breakfast_periods(rows=rows)
+    price_groups = build_available_price_groups(periods=breakfast_periods)
+    if price_idx < 0 or price_idx >= len(price_groups):
+        return []
+
+    selected_periods = [
+        breakfast_periods[period_idx]
+        for period_idx in price_groups[price_idx].period_indices
+        if 0 <= period_idx < len(breakfast_periods)
+    ]
+    if not selected_periods:
+        return []
+
+    merged: list[AvailablePeriod] = []
+    current = selected_periods[0]
+    current_start = current.start
+    current_display_start = current.display_start
+    current_end = current.end
+    current_rows = list(current.rows)
+
+    for period in selected_periods[1:]:
+        # UI labels use checkout date, so if previous checkout equals next checkin,
+        # the underlying inclusive periods are adjacent and can be shown as one button.
+        if period.start == current_end + date.resolution:
+            current_end = period.end
+            current_rows.extend(period.rows)
+            continue
+
+        merged.append(
+            AvailablePeriod(
+                start=current_start,
+                display_start=current_display_start,
+                end=current_end,
+                min_new_price_minor=min(row.new_price_minor for row in current_rows),
+                rows=sorted(current_rows, key=lambda row: (row.date, row.tariff, row.new_price_minor)),
+            )
+        )
+        current_start = period.start
+        current_display_start = period.display_start
+        current_end = period.end
+        current_rows = list(period.rows)
+
+    merged.append(
+        AvailablePeriod(
+            start=current_start,
+            display_start=current_display_start,
+            end=current_end,
+            min_new_price_minor=min(row.new_price_minor for row in current_rows),
+            rows=sorted(current_rows, key=lambda row: (row.date, row.tariff, row.new_price_minor)),
+        )
+    )
+    return merged
 
 
 def _available_interest_dates(*, rows: list) -> list[date]:
