@@ -27,6 +27,11 @@ class AvailablePeriod(NamedTuple):
     min_new_price_minor: int
     rows: list[MatchedDateRecord]
 
+    @property
+    def button_price_minor(self) -> int:
+        # Backward-compatible alias for UI flows that render period buttons.
+        return self.min_new_price_minor
+
 
 @dataclass(frozen=True, slots=True)
 class AvailableBreakfastPeriod:
