@@ -14,5 +14,6 @@
   "tariff_pairing_anomalies": 0,
   "duplicates_removed": 1,
   "summary_path": ".tmp_tests\\travelline_compare\\travelline_vs_selenium_summary.json",
-  "diff_path": ".tmp_tests\\travelline_compare\\travelline_vs_selenium_diff.csv"
+  "diff_path": ".tmp_tests\\travelline_compare\\travelline_vs_selenium_diff.csv",
+  "travelline_rates_path": ".tmp_tests\\travelline_compare\\travelline_rates.csv"
 }

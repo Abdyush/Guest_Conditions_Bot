@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import csv
+from io import StringIO
 from datetime import datetime
 from decimal import Decimal
 
 from src.application.dto.admin_dashboard import AdminReport, AdminStatistics, DesiredPriceByGroupStat
+from src.application.dto.travelline_publish_report import TravellinePublishRunReport
 
 
 def render_admin_main() -> str:
@@ -99,6 +102,121 @@ def render_price_expectations_table(stats: list[DesiredPriceByGroupStat]) -> str
             ]
         )
     return "\n".join(lines)
+
+
+def render_travelline_publish_report_summary(report: TravellinePublishRunReport | None) -> str:
+    if report is None:
+        return "Отчет по последнему Travelline publish run пока отсутствует."
+
+    adults_status_counts: dict[str, int] = {}
+    for item in report.adults_summaries:
+        adults_status_counts[item.status] = adults_status_counts.get(item.status, 0) + 1
+    adults_summary = ", ".join(
+        f"{status}={count}" for status, count in sorted(adults_status_counts.items())
+    ) or "нет данных"
+    reasons = "; ".join(report.validation_failure_reasons) if report.validation_failure_reasons else "—"
+
+    return "\n".join(
+        [
+            "Последний Travelline publish run",
+            "",
+            f"Статус: {report.validation_status}",
+            f"Fallback used: {'yes' if report.fallback_used else 'no'}",
+            f"Rows: {report.total_final_rows_count}",
+            f"Expected dates: {report.expected_dates_count}",
+            f"Actual dates: {report.actual_dates_count}",
+            f"Dates with no categories: {report.dates_with_no_categories_count}",
+            f"Tariff anomalies: {report.tariff_pairing_anomalies_count}",
+            f"Unmapped categories: {report.unmapped_categories_count}",
+            f"Adults summary: {adults_summary}",
+            f"Validation reasons: {reasons}",
+            f"Completed at: {_format_datetime(report.completed_at)}",
+        ]
+    )
+
+
+def build_travelline_publish_report_csv(report: TravellinePublishRunReport | None) -> bytes:
+    buffer = StringIO()
+    writer = csv.DictWriter(
+        buffer,
+        fieldnames=[
+            "row_type",
+            "run_id",
+            "validation_status",
+            "fallback_used",
+            "created_at",
+            "completed_at",
+            "validation_failure_reasons",
+            "expected_dates_count",
+            "actual_dates_count",
+            "dates_with_no_categories_count",
+            "total_final_rows_count",
+            "tariff_pairing_anomalies_count",
+            "unmapped_categories_count",
+            "adults_count",
+            "expected_requests_count",
+            "attempted_count",
+            "success_count",
+            "fail_count",
+            "collected_final_rows_count",
+            "adults_status",
+            "date",
+            "rows_count",
+        ],
+    )
+    writer.writeheader()
+    if report is None:
+        return buffer.getvalue().encode("utf-8")
+
+    writer.writerow(
+        {
+            "row_type": "summary",
+            "run_id": report.run_id,
+            "validation_status": report.validation_status,
+            "fallback_used": report.fallback_used,
+            "created_at": report.created_at.isoformat(sep=" "),
+            "completed_at": report.completed_at.isoformat(sep=" "),
+            "validation_failure_reasons": "; ".join(report.validation_failure_reasons),
+            "expected_dates_count": report.expected_dates_count,
+            "actual_dates_count": report.actual_dates_count,
+            "dates_with_no_categories_count": report.dates_with_no_categories_count,
+            "total_final_rows_count": report.total_final_rows_count,
+            "tariff_pairing_anomalies_count": report.tariff_pairing_anomalies_count,
+            "unmapped_categories_count": report.unmapped_categories_count,
+        }
+    )
+    for item in report.adults_summaries:
+        writer.writerow(
+            {
+                "row_type": "adults",
+                "run_id": report.run_id,
+                "adults_count": item.adults_count,
+                "expected_requests_count": item.expected_requests_count,
+                "attempted_count": item.attempted_count,
+                "success_count": item.success_count,
+                "fail_count": item.fail_count,
+                "collected_final_rows_count": item.collected_final_rows_count,
+                "adults_status": item.status,
+            }
+        )
+    for stay_date in report.empty_dates:
+        writer.writerow(
+            {
+                "row_type": "empty_date",
+                "run_id": report.run_id,
+                "date": stay_date.isoformat(),
+            }
+        )
+    for item in report.per_date_rows:
+        writer.writerow(
+            {
+                "row_type": "date_rows",
+                "run_id": report.run_id,
+                "date": item.stay_date.isoformat(),
+                "rows_count": item.rows_count,
+            }
+        )
+    return buffer.getvalue().encode("utf-8")
 
 
 def _format_datetime(value: datetime | None) -> str:

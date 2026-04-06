@@ -54,6 +54,57 @@ python main.py
 - nightly scheduler в Telegram bootstrap
 - manual triggers через Telegram admin flow
 
+## Rates Source Rollout
+
+Основной рекомендуемый runtime режим теперь:
+
+- `USE_TRAVELLINE_RATES_SOURCE=true`
+- `TRAVELLINE_ENABLE_PUBLISH=true`
+- `TRAVELLINE_COMPARE_ONLY=false`
+- `TRAVELLINE_FALLBACK_TO_SELENIUM=true`
+
+В этом режиме:
+
+- rates publish path идёт через Travelline
+- downstream по-прежнему получает только `DailyRate`
+- при ошибке Travelline publish path может явно откатиться на Selenium через fallback
+- compare-only path остаётся доступным отдельно и не удалён
+
+Обязательные Travelline env:
+
+- `TRAVELLINE_HOTEL_CODE`
+- `TRAVELLINE_BASE_URL`
+- `TRAVELLINE_TIMEOUT_SECONDS`
+
+### Режим A: Travelline publish as primary
+
+```env
+USE_TRAVELLINE_RATES_SOURCE=true
+TRAVELLINE_ENABLE_PUBLISH=true
+TRAVELLINE_COMPARE_ONLY=false
+TRAVELLINE_FALLBACK_TO_SELENIUM=true
+```
+
+### Режим B: Selenium primary
+
+```env
+USE_TRAVELLINE_RATES_SOURCE=false
+TRAVELLINE_ENABLE_PUBLISH=false
+TRAVELLINE_COMPARE_ONLY=false
+TRAVELLINE_FALLBACK_TO_SELENIUM=true
+```
+
+### Режим C: Shadow compare mode
+
+```env
+USE_TRAVELLINE_RATES_SOURCE=false
+TRAVELLINE_ENABLE_PUBLISH=false
+TRAVELLINE_COMPARE_ONLY=true
+TRAVELLINE_FALLBACK_TO_SELENIUM=true
+```
+
+Откат обратно на Selenium не требует изменений кода: достаточно переключить env-флаги на режим B.
+
 Это означает:
 
 - `main.py` — единственный production launcher

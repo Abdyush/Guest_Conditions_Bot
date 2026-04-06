@@ -10,7 +10,6 @@ from src.application.dto.guest_notification_batch import GuestNotificationBatch
 from src.application.dto.matched_date_record import MatchedDateRecord
 from src.application.ports.matches_run_repository import MatchesRunRepository
 from src.infrastructure.parsers.selenium_offers_parser_runner import SeleniumOffersParserRunner
-from src.infrastructure.parsers.selenium_rates_parser_runner import SeleniumRatesParserRunner
 
 
 logger = logging.getLogger(__name__)
@@ -60,6 +59,10 @@ class NotificationDelivery(Protocol):
     ) -> NotificationDeliveryResult: ...
 
 
+class RatesPipelineRunner(Protocol):
+    def run(self, *, start_date: date, days_to_collect: int, adults_counts: tuple[int, ...]) -> int: ...
+
+
 @dataclass(frozen=True, slots=True)
 class RunAttempt:
     started: bool
@@ -75,7 +78,7 @@ class PipelineOrchestrator:
         notifications: NotificationsPort,
         latest_runs: MatchesRunRepository,
         notification_delivery: NotificationDelivery,
-        rates_runner: SeleniumRatesParserRunner,
+        rates_runner: RatesPipelineRunner,
         offers_runner: SeleniumOffersParserRunner,
         matches_lookahead_days: int = 90,
     ):

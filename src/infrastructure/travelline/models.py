@@ -61,3 +61,35 @@ class TravellineRatesTransformResult:
     duplicate_keys: tuple[str, ...]
     tariff_pairing_anomalies: tuple[TariffPairingAnomaly, ...]
     category_mapping_mismatches: tuple[CategoryMappingMismatch, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class TravellineAdultsProcessingSummary:
+    adults_count: int
+    expected_requests_count: int
+    attempted_count: int
+    success_count: int
+    fail_count: int
+    collected_final_rows_count: int
+    status: str
+
+
+@dataclass(frozen=True, slots=True)
+class TravellineDateRowsStat:
+    stay_date: date
+    rows_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class TravellineCollectionDiagnostics:
+    expected_dates: tuple[date, ...]
+    adults_summaries: tuple[TravellineAdultsProcessingSummary, ...]
+    empty_dates: tuple[date, ...]
+    per_date_rows: tuple[TravellineDateRowsStat, ...]
+    collection_failure_reasons: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class TravellineCollectionResult:
+    transform_result: TravellineRatesTransformResult
+    diagnostics: TravellineCollectionDiagnostics

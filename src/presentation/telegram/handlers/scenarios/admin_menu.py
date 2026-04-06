@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import io
 from collections.abc import Awaitable, Callable
 
 from telegram import Update
@@ -15,6 +16,7 @@ from src.presentation.telegram.callbacks.data_parser import (
     ADMIN_REPORT_PARSER_OFFERS,
     ADMIN_REPORT_PARSER_RATES,
     ADMIN_REPORT_RECALCULATION,
+    ADMIN_REPORT_TRAVELLINE_PUBLISH,
     ADMIN_REPORT_USER_ERRORS,
     ADMIN_STAT_BLOCKED,
     ADMIN_STAT_NEW_USERS,
@@ -33,6 +35,7 @@ from src.presentation.telegram.keyboards.admin_menu import (
     ADMIN_REPORT_OFFERS_BUTTON,
     ADMIN_REPORT_RATES_BUTTON,
     ADMIN_REPORT_RECALC_BUTTON,
+    ADMIN_REPORT_TRAVELLINE_PUBLISH_BUTTON,
     ADMIN_REPORTS_BUTTON,
     ADMIN_RUN_OFFERS_BUTTON,
     ADMIN_RUN_RATES_BUTTON,
@@ -66,6 +69,8 @@ from src.presentation.telegram.presenters.admin_menu_presenter import (
     render_new_users_last_week,
     render_price_expectations_table,
     render_system_attempt_result,
+    render_travelline_publish_report_summary,
+    build_travelline_publish_report_csv,
     render_total_users,
 )
 from src.presentation.telegram.state.active_flow import ActiveFlow
@@ -319,6 +324,19 @@ class AdminMenuScenario:
             ADMIN_REPORT_USER_ERRORS: "user_errors",
         }
         key = report_key_by_callback.get(data)
+        if data == ADMIN_REPORT_TRAVELLINE_PUBLISH:
+            await query.answer()
+            report = self._deps.admin.get_latest_travelline_publish_report()
+            summary_text = render_travelline_publish_report_summary(report)
+            csv_bytes = build_travelline_publish_report_csv(report)
+            if query.message is not None:
+                await query.message.reply_text(summary_text, reply_markup=build_admin_reports_keyboard())
+                await query.message.reply_document(
+                    document=io.BytesIO(csv_bytes),
+                    filename="travelline_publish_last_run.csv",
+                    caption="CSV отчет по последнему Travelline publish run",
+                )
+            return
         if key is None:
             await query.answer()
             return

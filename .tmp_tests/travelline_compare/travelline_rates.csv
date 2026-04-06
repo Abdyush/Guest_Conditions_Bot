@@ -1,0 +1,3 @@
+date,adults_count,category_id,group_id,tariff_code,travelline_amount_minor,currency,is_available,is_last_room
+2026-04-10,2,Deluxe Mountain View,DELUXE,breakfast,1200000,RUB,True,False
+2026-04-10,2,Deluxe Mountain View,DELUXE,fullpansion,1500000,RUB,True,False

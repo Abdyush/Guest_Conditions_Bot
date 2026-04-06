@@ -22,6 +22,7 @@ class TravellineClientTimeout(TravellineClientError):
 
 
 logger = logging.getLogger(__name__)
+RETRYABLE_HTTP_STATUSES = frozenset({502, 503, 504})
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,6 +63,16 @@ class TravellineClient:
                     raise TravellineClientError(f"invalid_payload_type path={path} type={type(payload).__name__}")
                 return TravellineHTTPResponse(status=status, payload=payload)
             except HTTPError as exc:
+                if exc.code in RETRYABLE_HTTP_STATUSES and attempt < attempts_total:
+                    logger.warning(
+                        "travelline_retry path=%s attempt=%s/%s reason=http_%s",
+                        path,
+                        attempt,
+                        attempts_total,
+                        exc.code,
+                    )
+                    time.sleep(self.retry_pause_seconds * attempt)
+                    continue
                 raise TravellineClientError(f"http_error status={exc.code} path={path}") from exc
             except (socket.timeout, TimeoutError) as exc:
                 if attempt >= attempts_total:
@@ -72,7 +83,7 @@ class TravellineClient:
                     attempt,
                     attempts_total,
                 )
-                time.sleep(self.retry_pause_seconds)
+                time.sleep(self.retry_pause_seconds * attempt)
             except URLError as exc:
                 if isinstance(exc.reason, socket.timeout):
                     if attempt >= attempts_total:
@@ -83,7 +94,7 @@ class TravellineClient:
                         attempt,
                         attempts_total,
                     )
-                    time.sleep(self.retry_pause_seconds)
+                    time.sleep(self.retry_pause_seconds * attempt)
                     continue
                 if attempt >= attempts_total:
                     raise TravellineClientError(f"network_error path={path} detail={exc.reason}") from exc
@@ -94,4 +105,4 @@ class TravellineClient:
                     attempts_total,
                     exc.reason,
                 )
-                time.sleep(self.retry_pause_seconds)
+                time.sleep(self.retry_pause_seconds * attempt)

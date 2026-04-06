@@ -8,6 +8,7 @@ from decimal import Decimal
 from uuid import uuid4
 
 from src.application.dto.admin_dashboard import AdminReport, AdminStatistics
+from src.application.dto.travelline_publish_report import TravellinePublishRunReport
 from src.application.dto.get_best_period_query import GetBestPeriodQuery
 from src.application.dto.get_period_quotes_query import GetPeriodQuotesQuery
 from src.application.dto.guest_notification_batch import GuestNotificationBatch
@@ -20,6 +21,7 @@ from src.application.use_cases.find_best_periods_in_group import DEFAULT_LOYALTY
 from src.application.use_cases.find_group_categories_for_guest import find_group_categories_for_guest
 from src.application.use_cases.get_admin_reports import GetAdminReports
 from src.application.use_cases.get_admin_statistics import GetAdminStatistics
+from src.application.use_cases.get_latest_travelline_publish_report import GetLatestTravellinePublishReport
 from src.application.use_cases.get_best_periods_for_guest_in_group import GetBestPeriodsForGuestInGroup
 from src.application.use_cases.get_period_quotes_from_matches_run import GetPeriodQuotesFromMatchesRun
 from src.application.use_cases.prepare_guest_notification_batches import PrepareGuestNotificationBatches
@@ -40,6 +42,7 @@ from src.infrastructure.repositories.postgres_matches_run_repository import Post
 from src.infrastructure.repositories.postgres_notifications_repository import PostgresNotificationsRepository
 from src.infrastructure.repositories.postgres_offers_repository import PostgresOffersRepository
 from src.infrastructure.repositories.postgres_rules_repository import PostgresRulesRepository
+from src.infrastructure.repositories.postgres_travelline_publish_report_repository import PostgresTravellinePublishReportRepository
 from src.infrastructure.repositories.postgres_user_identities_repository import PostgresUserIdentitiesRepository
 from src.infrastructure.synchronization.recalculation_run_coordinator import RecalculationRunCoordinator
 
@@ -56,6 +59,7 @@ class TelegramUseCasesDependencies:
     rates_repo: PostgresDailyRatesRepository
     offers_repo: PostgresOffersRepository
     rules_repo: PostgresRulesRepository
+    travelline_publish_report_repo: PostgresTravellinePublishReportRepository
     matches_run_repo: PostgresMatchesRunRepository
     desired_matches_run_repo: PostgresDesiredMatchesRunRepository
     notifications_repo: PostgresNotificationsRepository
@@ -73,6 +77,7 @@ class TelegramServicesContext:
     rates_repo: PostgresDailyRatesRepository
     offers_repo: PostgresOffersRepository
     rules_repo: PostgresRulesRepository
+    travelline_publish_report_repo: PostgresTravellinePublishReportRepository
     matches_run_repo: PostgresMatchesRunRepository
     desired_matches_run_repo: PostgresDesiredMatchesRunRepository
     notifications_repo: PostgresNotificationsRepository
@@ -80,6 +85,7 @@ class TelegramServicesContext:
     period_quotes_uc: GetPeriodQuotesFromMatchesRun
     get_admin_reports_uc: GetAdminReports
     get_admin_statistics_uc: GetAdminStatistics
+    get_latest_travelline_publish_report_uc: GetLatestTravellinePublishReport
     prepare_notification_batches_uc: PrepareGuestNotificationBatches
     matches_lookahead_days: int
     recalculation_coordinator: RecalculationRunCoordinator | None
@@ -671,6 +677,9 @@ class TelegramAdminFacade(TelegramBaseFacade):
     def get_admin_statistics(self) -> AdminStatistics:
         return self._ctx.get_admin_statistics_uc.execute(now=datetime.now(timezone.utc).replace(tzinfo=None))
 
+    def get_latest_travelline_publish_report(self) -> TravellinePublishRunReport | None:
+        return self._ctx.get_latest_travelline_publish_report_uc.execute()
+
 
 class TelegramSystemFacade(TelegramBaseFacade):
     def recalculate_matches(
@@ -698,6 +707,7 @@ def build_telegram_presentation_services(*, deps: TelegramUseCasesDependencies) 
         rates_repo=deps.rates_repo,
         offers_repo=deps.offers_repo,
         rules_repo=deps.rules_repo,
+        travelline_publish_report_repo=deps.travelline_publish_report_repo,
         matches_run_repo=deps.matches_run_repo,
         desired_matches_run_repo=deps.desired_matches_run_repo,
         notifications_repo=deps.notifications_repo,
@@ -712,6 +722,9 @@ def build_telegram_presentation_services(*, deps: TelegramUseCasesDependencies) 
         get_admin_statistics_uc=GetAdminStatistics(
             insights_repo=deps.admin_insights_repo,
             events_repo=deps.admin_events_repo,
+        ),
+        get_latest_travelline_publish_report_uc=GetLatestTravellinePublishReport(
+            repo=deps.travelline_publish_report_repo,
         ),
         prepare_notification_batches_uc=PrepareGuestNotificationBatches(
             desired_matches_repo=deps.desired_matches_run_repo,

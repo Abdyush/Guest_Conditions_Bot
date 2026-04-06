@@ -72,6 +72,22 @@ def test_travelline_client_http_error() -> None:
         client.get_json("hotel_info", params={"hotelCode": "M1"})
 
 
+def test_travelline_client_retries_on_transient_http_error() -> None:
+    calls = {"count": 0}
+
+    def fake_open(request, timeout):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise HTTPError(request.full_url, 502, "Bad Gateway", hdrs=None, fp=io.BytesIO(b"{}"))
+        return _FakeResponse(b'{"ok": true}')
+
+    client = TravellineClient(opener=fake_open, retry_count=1, retry_pause_seconds=0.0)
+    payload = client.get_json("hotel_info", params={"hotelCode": "M1"})
+
+    assert payload["ok"] is True
+    assert calls["count"] == 2
+
+
 def test_travelline_client_retries_on_network_error() -> None:
     calls = {"count": 0}
 

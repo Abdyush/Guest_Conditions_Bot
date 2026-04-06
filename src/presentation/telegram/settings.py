@@ -22,6 +22,22 @@ class TelegramRuntimeSettings:
     rates_parser_batch_pause_seconds: float
     rates_parser_retry_count: int
     rates_parser_retry_pause_seconds: float
+    use_travelline_rates_source: bool
+    travelline_compare_only: bool
+    travelline_enable_publish: bool
+    travelline_fallback_to_selenium: bool
+    travelline_hotel_code: str
+    travelline_base_url: str
+    travelline_timeout_seconds: float
+    travelline_publish_max_tariff_pairing_anomalies: int
+    travelline_publish_max_unmapped_categories: int
+
+
+def _parse_bool_env(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def load_telegram_settings() -> TelegramSettings:
@@ -53,6 +69,24 @@ def load_telegram_runtime_settings() -> TelegramRuntimeSettings:
     rates_parser_batch_pause_seconds = max(0.0, float(os.getenv("RATES_PARSER_BATCH_PAUSE_SECONDS", "3")))
     rates_parser_retry_count = max(0, int(os.getenv("RATES_PARSER_RETRY_COUNT", "1")))
     rates_parser_retry_pause_seconds = max(0.0, float(os.getenv("RATES_PARSER_RETRY_PAUSE_SECONDS", "1")))
+    use_travelline_rates_source = _parse_bool_env("USE_TRAVELLINE_RATES_SOURCE", True)
+    travelline_compare_only = _parse_bool_env("TRAVELLINE_COMPARE_ONLY", False)
+    travelline_enable_publish = _parse_bool_env("TRAVELLINE_ENABLE_PUBLISH", True)
+    travelline_fallback_to_selenium = _parse_bool_env("TRAVELLINE_FALLBACK_TO_SELENIUM", True)
+    travelline_hotel_code = os.getenv("TRAVELLINE_HOTEL_CODE", "").strip()
+    travelline_base_url = os.getenv(
+        "TRAVELLINE_BASE_URL",
+        "https://ru-ibe.tlintegration.ru/ApiWebDistribution/BookingForm",
+    ).strip()
+    travelline_timeout_seconds = max(1.0, float(os.getenv("TRAVELLINE_TIMEOUT_SECONDS", "20")))
+    travelline_publish_max_tariff_pairing_anomalies = max(
+        0,
+        int(os.getenv("TRAVELLINE_PUBLISH_MAX_TARIFF_PAIRING_ANOMALIES", "0")),
+    )
+    travelline_publish_max_unmapped_categories = max(
+        0,
+        int(os.getenv("TRAVELLINE_PUBLISH_MAX_UNMAPPED_CATEGORIES", "0")),
+    )
 
     return TelegramRuntimeSettings(
         bot_token=token,
@@ -66,4 +100,13 @@ def load_telegram_runtime_settings() -> TelegramRuntimeSettings:
         rates_parser_batch_pause_seconds=rates_parser_batch_pause_seconds,
         rates_parser_retry_count=rates_parser_retry_count,
         rates_parser_retry_pause_seconds=rates_parser_retry_pause_seconds,
+        use_travelline_rates_source=use_travelline_rates_source,
+        travelline_compare_only=travelline_compare_only,
+        travelline_enable_publish=travelline_enable_publish,
+        travelline_fallback_to_selenium=travelline_fallback_to_selenium,
+        travelline_hotel_code=travelline_hotel_code,
+        travelline_base_url=travelline_base_url,
+        travelline_timeout_seconds=travelline_timeout_seconds,
+        travelline_publish_max_tariff_pairing_anomalies=travelline_publish_max_tariff_pairing_anomalies,
+        travelline_publish_max_unmapped_categories=travelline_publish_max_unmapped_categories,
     )

@@ -38,7 +38,7 @@ Production runtime использует:
 - `aiogram` Redis FSM storage как backend для состояния сессий
 - PostgreSQL как основное долговременное хранилище
 - Redis как хранилище FSM state/data
-- Selenium для загрузки тарифов и офферов
+- Selenium для offers parser и как fallback path для rates; Travelline является основным рекомендуемым rates source
 
 Важно:
 - `scripts/` не являются production startup surface
@@ -263,6 +263,15 @@ Runtime repositories:
 - `RATES_PARSER_RETRY_COUNT`
 - `RATES_PARSER_RETRY_PAUSE_SECONDS`
 - `RECALC_ADVISORY_LOCK_KEY`
+- `USE_TRAVELLINE_RATES_SOURCE`
+- `TRAVELLINE_ENABLE_PUBLISH`
+- `TRAVELLINE_COMPARE_ONLY`
+- `TRAVELLINE_FALLBACK_TO_SELENIUM`
+- `TRAVELLINE_HOTEL_CODE`
+- `TRAVELLINE_BASE_URL`
+- `TRAVELLINE_TIMEOUT_SECONDS`
+- `TRAVELLINE_PUBLISH_MAX_TARIFF_PAIRING_ANOMALIES`
+- `TRAVELLINE_PUBLISH_MAX_UNMAPPED_CATEGORIES`
 
 Docker Compose поднимает:
 - bot
