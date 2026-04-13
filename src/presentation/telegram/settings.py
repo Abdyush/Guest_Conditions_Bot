@@ -65,7 +65,7 @@ def load_telegram_runtime_settings() -> TelegramRuntimeSettings:
     selenium_wait_seconds = int(os.getenv("SELENIUM_WAIT_SECONDS", "20"))
     timezone_name = os.getenv("BOT_TIMEZONE", "Europe/Moscow")
     proactive_notification_cooldown_days = max(0, int(os.getenv("PROACTIVE_NOTIFICATION_COOLDOWN_DAYS", "7")))
-    matches_lookahead_days = max(1, int(os.getenv("MATCHES_LOOKAHEAD_DAYS", "90")))
+    matches_lookahead_days = max(1, int(os.getenv("MATCHES_LOOKAHEAD_DAYS", "180")))
     rates_parser_batch_pause_seconds = max(0.0, float(os.getenv("RATES_PARSER_BATCH_PAUSE_SECONDS", "3")))
     rates_parser_retry_count = max(0, int(os.getenv("RATES_PARSER_RETRY_COUNT", "1")))
     rates_parser_retry_pause_seconds = max(0.0, float(os.getenv("RATES_PARSER_RETRY_PAUSE_SECONDS", "1")))

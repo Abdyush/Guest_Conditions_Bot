@@ -25,7 +25,7 @@ def _parse_date(value: str) -> date:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Get best period(s) for guest in selected category group")
     default_from = date.today()
-    default_to = default_from + timedelta(days=90)
+    default_to = default_from + timedelta(days=180)
     parser.add_argument("--guest-id", required=True, help="Guest ID, e.g. G1")
     parser.add_argument("--group-id", required=True, help="Group ID, e.g. DELUXE")
     parser.add_argument("--date-from", default=default_from.isoformat(), help="YYYY-MM-DD")

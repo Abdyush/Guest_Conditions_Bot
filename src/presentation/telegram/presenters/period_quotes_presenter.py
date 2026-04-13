@@ -243,8 +243,6 @@ def _render_discount_lines(quotes: Iterable[PeriodQuote]) -> list[str]:
             seen.add(label)
 
     for quote in quotes:
-        if quote.offer_repr:
-            continue
         if quote.bank_status and quote.bank_percent is not None:
             label = f"\u2022 {_format_bank_discount_name(quote.bank_status)} \u2014 {_format_percent_text(quote.bank_percent)}"
             if label not in seen:

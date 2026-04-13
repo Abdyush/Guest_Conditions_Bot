@@ -4,7 +4,8 @@ from src.presentation.telegram.presenters.available_presenter import render_avai
 
 
 def render_notification_intro(*, guest_name: str) -> str:
-    return f"Я нашёл для Вас новые подходящие предложения ✨\n{guest_name}, ниже откроется просмотр доступных вариантов и цен."
+    short_name = _short_guest_name(guest_name)
+    return f"Я нашёл для Вас новые подходящие предложения ✨\n{short_name}, ниже откроется просмотр доступных вариантов и цен."
 
 
 def render_notification_groups_prompt() -> str:
@@ -21,3 +22,10 @@ def render_notification_flow_hint() -> str:
 
 def render_notification_offer_text(*, offer_title: str | None, offer_text: str) -> str:
     return render_available_offer_text(offer_title=offer_title, offer_text=offer_text)
+
+
+def _short_guest_name(value: str) -> str:
+    normalized = (value or "").strip()
+    if not normalized:
+        return "Гость"
+    return normalized.split()[0]

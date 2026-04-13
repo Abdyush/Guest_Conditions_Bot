@@ -80,7 +80,7 @@ class PipelineOrchestrator:
         notification_delivery: NotificationDelivery,
         rates_runner: RatesPipelineRunner,
         offers_runner: SeleniumOffersParserRunner,
-        matches_lookahead_days: int = 90,
+        matches_lookahead_days: int = 180,
     ):
         self._admin = admin
         self._system = system

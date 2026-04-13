@@ -19,6 +19,7 @@ def test_load_telegram_runtime_settings_defaults_to_travelline_primary_rollout(m
     assert settings.travelline_enable_publish is True
     assert settings.travelline_fallback_to_selenium is True
     assert settings.travelline_hotel_code == ""
+    assert settings.matches_lookahead_days == 180
 
 
 def test_load_telegram_runtime_settings_allows_explicit_selenium_rollback_mode(monkeypatch) -> None:

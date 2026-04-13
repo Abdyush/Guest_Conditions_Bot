@@ -72,7 +72,7 @@ def test_default_config_uses_selenium_only() -> None:
 
     rows = runner.run(
         start_date=date(2026, 4, 5),
-        days_to_collect=90,
+        days_to_collect=180,
         adults_counts=(1, 2, 3, 4, 5, 6),
     )
 
@@ -96,7 +96,7 @@ def test_explicit_selenium_primary_rollback_mode_still_uses_selenium_only() -> N
 
     rows = runner.run(
         start_date=date(2026, 4, 5),
-        days_to_collect=90,
+        days_to_collect=180,
         adults_counts=(1, 2, 3, 4, 5, 6),
     )
 
@@ -118,7 +118,7 @@ def test_travelline_publish_enabled_uses_travelline_publish_path() -> None:
 
     rows = runner.run(
         start_date=date(2026, 4, 5),
-        days_to_collect=90,
+        days_to_collect=180,
         adults_counts=(1, 2, 3, 4, 5, 6),
     )
 
@@ -139,7 +139,7 @@ def test_travelline_compare_only_runs_without_publish() -> None:
 
     rows = runner.run(
         start_date=date(2026, 4, 5),
-        days_to_collect=90,
+        days_to_collect=180,
         adults_counts=(1, 2, 3, 4, 5, 6),
     )
 
@@ -147,7 +147,7 @@ def test_travelline_compare_only_runs_without_publish() -> None:
     assert len(selenium_runner.calls) == 1
     assert travelline_runner.run_calls == []
     assert travelline_runner.compare_calls == [
-        (date(2026, 4, 5), date(2026, 7, 3), (1, 2, 3, 4, 5, 6))
+        (date(2026, 4, 5), date(2026, 10, 1), (1, 2, 3, 4, 5, 6))
     ]
 
 
@@ -164,7 +164,7 @@ def test_travelline_failure_with_fallback_enabled_switches_to_selenium(caplog) -
                 validation_status="failed",
                 validation_failure_reasons=("adults_6:attempt_failed",),
                 fallback_used=False,
-                expected_dates_count=90,
+                expected_dates_count=180,
                 actual_dates_count=88,
                 dates_with_no_categories_count=2,
                 total_final_rows_count=4400,
@@ -187,7 +187,7 @@ def test_travelline_failure_with_fallback_enabled_switches_to_selenium(caplog) -
     with caplog.at_level(logging.INFO):
         rows = runner.run(
             start_date=date(2026, 4, 5),
-            days_to_collect=90,
+            days_to_collect=180,
             adults_counts=(1, 2, 3, 4, 5, 6),
         )
 
@@ -211,7 +211,7 @@ def test_travelline_failure_with_fallback_disabled_raises() -> None:
     with pytest.raises(RuntimeError, match="travelline boom"):
         runner.run(
             start_date=date(2026, 4, 5),
-            days_to_collect=90,
+            days_to_collect=180,
             adults_counts=(1, 2, 3, 4, 5, 6),
         )
 

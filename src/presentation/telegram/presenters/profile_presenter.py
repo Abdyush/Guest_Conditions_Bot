@@ -29,21 +29,25 @@ def render_profile(profile: GuestPreferences, user=None) -> str:
     categories_list = "\n".join(f"• {code_to_label.get(group, group)}" for group in groups) if groups else "• —"
     full_name = _format_full_name(profile=profile, user=user)
     adults_text = _format_adults(profile.occupancy.adults)
+    children_block = _format_children_block(profile)
     status_line = _format_status_line(profile)
     price_formatted = _format_price(profile.desired_price_per_night.round_rubles())
+
+    guest_lines = [adults_text]
+    if children_block:
+        guest_lines.append(children_block)
+
     return (
         "Ваши данные\n\n"
         f"👤 {full_name}\n\n"
         "👥 Состав гостей\n"
-        f"{adults_text}\n"
-        f"Дети 4–17: {profile.occupancy.children_4_13}\n"
-        f"Дети 0–3: {profile.occupancy.infants}\n\n"
+        f"{'\n'.join(guest_lines)}\n\n"
         "🏨 Выбранные категории\n"
         f"{categories_list}\n\n"
         "💎 Статус\n"
         f"{status_line}\n\n"
-        "💰 Целевой бюджет\n"
-        f"{price_formatted} ₽ за сутки"
+        "💰 Целевой бюджет в сутки\n"
+        f"{price_formatted} ₽"
     )
 
 
@@ -60,6 +64,15 @@ def _format_adults(adults: int) -> str:
     if adults == 1:
         return "1 взрослый"
     return f"{adults} взрослых"
+
+
+def _format_children_block(profile: GuestPreferences) -> str:
+    lines: list[str] = []
+    if profile.occupancy.children_4_13 > 0:
+        lines.append(f"Дети, от 4 до 17 лет: {profile.occupancy.children_4_13}")
+    if profile.occupancy.infants > 0:
+        lines.append(f"Дети, до 3 лет: {profile.occupancy.infants}")
+    return "\n".join(lines)
 
 
 def _format_status_line(profile: GuestPreferences) -> str:

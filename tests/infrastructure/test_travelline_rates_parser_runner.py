@@ -515,7 +515,7 @@ def test_runner_marks_fallback_used_in_report_repository() -> None:
         validation_status="failed",
         validation_failure_reasons=("adults_6:attempt_failed",),
         fallback_used=False,
-        expected_dates_count=90,
+        expected_dates_count=180,
         actual_dates_count=88,
         dates_with_no_categories_count=2,
         total_final_rows_count=4400,

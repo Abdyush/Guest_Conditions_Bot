@@ -64,7 +64,7 @@ class TelegramUseCasesDependencies:
     desired_matches_run_repo: PostgresDesiredMatchesRunRepository
     notifications_repo: PostgresNotificationsRepository
     proactive_notification_cooldown_days: int = 7
-    matches_lookahead_days: int = 90
+    matches_lookahead_days: int = 180
     recalculation_coordinator: RecalculationRunCoordinator | None = None
 
 
